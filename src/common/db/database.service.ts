@@ -19,9 +19,9 @@ export class RoomNotFoundError extends Error {
 }
 
 /**
- * 트랜잭션이 `REQUEST_TIMEOUT_MS` 안에 끝나지 않았다. 호출자는 콜백이 끝나기를 기다리지 않고
- * 이 시점에 거부된다. 트랜잭션은 Prisma가 같은 시각에 롤백하고 방 잠금이 풀린다. 콜백 자체는
- * 취소되지 않고 계속 실행될 수 있으나 이후 쿼리는 실패한다(부수 효과는 트랜잭션 안에서만 만든다).
+ * 호출 시점부터 `REQUEST_TIMEOUT_MS` 안에 트랜잭션이 끝나지 않았다(풀 연결 대기 포함). 호출자는 콜백이
+ * 끝나기를 기다리지 않고 이 마감에 거부되고, 트랜잭션은 같은 마감에 롤백되어 방 잠금이 풀린다. 콜백
+ * 자체는 취소되지 않고 계속 실행될 수 있으나 이후 쿼리는 실패한다(부수 효과는 트랜잭션 안에서만 만든다).
  */
 export class RequestTimeoutError extends Error {
   constructor(readonly limitMs: number) {
@@ -73,27 +73,51 @@ export class DatabaseService {
     return rows[0]!.now;
   }
 
+  /**
+   * 한도는 호출 시점부터의 **절대 마감**이다. 풀 연결을 기다린 시간(`maxWait`)도 한도에 포함된다.
+   * - 호출자: 마감에 `RequestTimeoutError`로 거부된다(콜백이 끝나기를 기다리지 않는다).
+   * - 트랜잭션: 콜백 안에서 남은 시간으로 마감을 걸어 같은 시각에 콜백을 거부시키므로 Prisma가 그 즉시
+   *   롤백하고 방 잠금이 풀린다. 마감 뒤에 도착한 문장은 닫힌 트랜잭션에서 실패해 커밋되지 않는다.
+   *   트랜잭션이 마감 뒤에야 시작되면 `fn`을 실행하지 않고 던진다.
+   * - 콜백 `fn` 자체는 취소되지 않고 계속 실행될 수 있다(부수 효과는 트랜잭션 안에서만 만든다).
+   */
   private async transaction<T>(
     isolationLevel: 'RepeatableRead' | undefined,
     fn: (tx: DbTx) => Promise<T>,
   ): Promise<T> {
     const limit = this.timeouts.REQUEST_TIMEOUT_MS;
-    let timer: NodeJS.Timeout | undefined;
-    const deadline = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new RequestTimeoutError(limit)), limit);
+    const deadlineAt = Date.now() + limit;
+    let callerTimer: NodeJS.Timeout | undefined;
+    const callerDeadline = new Promise<never>((_, reject) => {
+      callerTimer = setTimeout(() => reject(new RequestTimeoutError(limit)), limit);
     });
-    const run = this.prisma.client.$transaction(fn, {
-      // 풀 연결을 기다리는 시간은 잠금 대기와 같은 한도로 묶는다.
-      maxWait: this.timeouts.DB_LOCK_TIMEOUT_MS,
-      // Prisma도 같은 한도로 롤백한다(잠금 해제). 호출자는 위 deadline으로 먼저 거부된다.
-      timeout: limit,
-      ...(isolationLevel ? { isolationLevel } : {}),
-    });
-    run.catch(() => undefined); // deadline에 진 뒤 늦게 거부되는 결과는 처리된 것으로 본다.
+    const run = this.prisma.client.$transaction(
+      async (tx) => {
+        const remaining = deadlineAt - Date.now();
+        if (remaining <= 0) throw new RequestTimeoutError(limit);
+        let txTimer: NodeJS.Timeout | undefined;
+        const txDeadline = new Promise<never>((_, reject) => {
+          txTimer = setTimeout(() => reject(new RequestTimeoutError(limit)), remaining);
+        });
+        try {
+          return await Promise.race([fn(tx), txDeadline]);
+        } finally {
+          clearTimeout(txTimer);
+        }
+      },
+      {
+        // 풀 연결을 기다리는 시간은 잠금 대기와 같은 한도로 묶는다.
+        maxWait: this.timeouts.DB_LOCK_TIMEOUT_MS,
+        // 위 절대 마감이 먼저 롤백한다. Prisma 자체 제한은 만일을 위한 상한이다.
+        timeout: limit,
+        ...(isolationLevel ? { isolationLevel } : {}),
+      },
+    );
+    run.catch(() => undefined); // 호출자 마감에 진 뒤 늦게 거부되는 결과는 처리된 것으로 본다.
     try {
-      return await Promise.race([run, deadline]);
+      return await Promise.race([run, callerDeadline]);
     } finally {
-      clearTimeout(timer);
+      clearTimeout(callerTimer);
     }
   }
 

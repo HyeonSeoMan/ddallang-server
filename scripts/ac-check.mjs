@@ -67,22 +67,31 @@ function tagsFromTitle(arg) {
   return [];
 }
 
-function isEmptyEach(callee) {
-  // it.each([])('…') : 호출 대상이 `it.each(<빈 배열 리터럴>)`이면 시험 사례가 0개다.
-  return (
-    ts.isCallExpression(callee) &&
-    ts.isPropertyAccessExpression(callee.expression) &&
-    callee.expression.name.text === 'each' &&
-    callee.arguments[0] !== undefined &&
-    ts.isArrayLiteralExpression(callee.arguments[0]) &&
-    callee.arguments[0].elements.length === 0
-  );
+/**
+ * `it.each(<표>)`의 시험 사례 수를 정적으로 판정한다: 'none'(each 아님) | 'empty' | 'some' | 'unknown'.
+ * 표가 배열 리터럴이고 전개(...)가 없을 때만 알 수 있다. 변수·전개·함수 호출은 'unknown'이며,
+ * 정적 모드에서는 덮는다고 보지 않는다(통과 여부는 --results 모드가 증명한다).
+ */
+function eachCases(expr) {
+  let cur = expr;
+  for (;;) {
+    if (ts.isCallExpression(cur)) {
+      if (ts.isPropertyAccessExpression(cur.expression) && cur.expression.name.text === 'each') {
+        const table = cur.arguments[0];
+        if (!table || !ts.isArrayLiteralExpression(table)) return 'unknown';
+        if (table.elements.some((e) => ts.isSpreadElement(e))) return 'unknown';
+        return table.elements.length === 0 ? 'empty' : 'some';
+      }
+      cur = cur.expression;
+    } else if (ts.isPropertyAccessExpression(cur)) cur = cur.expression;
+    else return 'none';
+  }
 }
 
 /**
  * 시험 파일 하나에서 제목 태그를 모은다. 주석·시험 본문 안의 문자열은 세지 않는다.
  * 태그가 "덮는다"고 보려면 실제로 실행될 시험 사례가 있어야 한다:
- * - skip/todo/skipIf가 붙었거나, 그런 조상(describe.skip 등) 안에 있거나, 빈 it.each이면 덮지 않는다.
+ * - skip/todo/skipIf가 붙었거나, 그런 조상(describe.skip 등) 안에 있거나, 빈·알 수 없는 it.each이면 덮지 않는다.
  * - describe의 태그는 그 안에 실행될 시험 사례가 하나 이상 있을 때만 덮는다.
  */
 export function scanTestSource(path, text) {
@@ -95,7 +104,9 @@ export function scanTestSource(path, text) {
       if (chain && TEST_BASES.has(chain.base)) {
         const tags = tagsFromTitle(node.arguments[0]);
         const only = chain.mods.includes('only');
-        const dead = chain.mods.some((m) => SKIP_MODS.has(m)) || isEmptyEach(node.expression);
+        const each = eachCases(node.expression);
+        const dead =
+          chain.mods.some((m) => SKIP_MODS.has(m)) || each === 'empty' || each === 'unknown';
         const isSuite = chain.base === 'describe';
         const entry = {
           tags,
@@ -183,6 +194,10 @@ export function evaluate({ rows, tags, results, task, spec, health, allowEmpty }
   const covered = new Set();
   const skippedOnly = new Set();
 
+  // `.only`는 다른 시험을 가리므로 두 모드 모두에서 실패다(results 모드도 소스를 검사한다).
+  for (const t of tags) {
+    if (t.only) problems.push({ kind: 'only', file: t.file, line: t.line });
+  }
   if (results) {
     const passed = new Set();
     const failed = new Set();
@@ -195,7 +210,6 @@ export function evaluate({ rows, tags, results, task, spec, health, allowEmpty }
     for (const id of failed) problems.push({ kind: 'failed-test', id });
   } else {
     for (const t of tags) {
-      if (t.only) problems.push({ kind: 'only', file: t.file, line: t.line });
       if (!t.id) continue;
       if (t.skipped) skippedOnly.add(t.id);
       else covered.add(t.id);
@@ -309,7 +323,7 @@ export function run(argv, io = { out: (s) => console.log(s) }) {
   io.out(`필수 ${r.required}개 중 시험 있음 ${r.covered}개, 없음 ${r.missing.length}개`);
   for (const m of r.missing)
     io.out(
-      `  누락 ${m.id} (${m.spec}, ${m.task})${m.skipped ? ' [skip/todo/미통과 시험만 있음]' : ''}`,
+      `  누락 ${m.id} (${m.spec}, ${m.task})${m.skipped ? ' [skip/todo·빈 또는 알 수 없는 each·미통과 시험만 있음, 동적 each는 --results로 확인]' : ''}`,
     );
   for (const p of r.problems) {
     if (p.kind === 'unknown-tag') io.out(`  오류 표에 없는 태그: ${p.id}`);

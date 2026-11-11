@@ -232,6 +232,78 @@ describe('요청 제한 시간 (PD-3, RK-5)', () => {
   });
 });
 
+describe('요청 마감은 풀 연결 대기까지 포함한 절대 시각이다 (리뷰 F05)', () => {
+  it('트랜잭션 시작이 늦어도 마감 뒤에 도착한 쓰기는 커밋되지 않는다', async () => {
+    // 풀 크기 1: 다른 요청이 연결을 쥐고 있는 동안 두 번째 요청은 시작을 기다린다.
+    const narrow = new PrismaService({ DATABASE_URL: ts.databaseUrl, DB_POOL_MAX: 1 });
+    const tight = new DatabaseService(narrow, {
+      DB_LOCK_TIMEOUT_MS: 5_000,
+      DB_STATEMENT_TIMEOUT_MS: 6_000,
+      REQUEST_TIMEOUT_MS: 1_000,
+    });
+    try {
+      const holderDb = new DatabaseService(narrow, {
+        DB_LOCK_TIMEOUT_MS: 5_000,
+        DB_STATEMENT_TIMEOUT_MS: 6_000,
+        REQUEST_TIMEOUT_MS: 30_000,
+      });
+      const holder = holderDb.withRoomLock('b', async () => sleep(500)); // 연결을 0.5초 점유
+      await sleep(50);
+      const t0 = Date.now();
+      const err = await tight
+        .withRoomLock('a', async (tx) => {
+          await sleep(700); // 시작이 ~500ms에 이뤄졌으므로 이 쓰기는 ~1200ms, 마감(1000ms) 뒤다
+          await tx.$executeRaw`UPDATE "Room" SET "revision" = 99 WHERE "id" = 'a'`;
+        })
+        .then(
+          () => undefined,
+          (e: unknown) => e,
+        );
+      const elapsed = Date.now() - t0;
+      await holder;
+      expect(err).toBeInstanceOf(RequestTimeoutError);
+      expect(elapsed).toBeLessThan(1_300); // 시작 뒤 1초가 아니라 호출 시점부터 1초
+      await sleep(1_000); // 늦은 쓰기가 도착할 시간을 준다
+      expect(await revision('a')).toBe(0);
+    } finally {
+      await narrow.onModuleDestroy();
+    }
+  });
+
+  it('시작하기도 전에 마감이 지나면 콜백을 실행하지 않는다', async () => {
+    const narrow = new PrismaService({ DATABASE_URL: ts.databaseUrl, DB_POOL_MAX: 1 });
+    const tight = new DatabaseService(narrow, {
+      DB_LOCK_TIMEOUT_MS: 5_000,
+      DB_STATEMENT_TIMEOUT_MS: 6_000,
+      REQUEST_TIMEOUT_MS: 300,
+    });
+    try {
+      const holderDb = new DatabaseService(narrow, {
+        DB_LOCK_TIMEOUT_MS: 5_000,
+        DB_STATEMENT_TIMEOUT_MS: 6_000,
+        REQUEST_TIMEOUT_MS: 30_000,
+      }); // 연결을 쥐는 쪽은 한도가 길어 마감에 걸리지 않는다
+      const holder = holderDb.withRoomLock('b', async () => sleep(600));
+      await sleep(50);
+      let ran = false;
+      const err = await tight
+        .withRoomLock('a', async () => {
+          ran = true;
+        })
+        .then(
+          () => undefined,
+          (e: unknown) => e,
+        );
+      expect(err).toBeInstanceOf(RequestTimeoutError);
+      await holder;
+      await sleep(700);
+      expect(ran).toBe(false);
+    } finally {
+      await narrow.onModuleDestroy();
+    }
+  });
+});
+
 describe('readSnapshot (PD-11)', () => {
   it('REPEATABLE READ, READ ONLY이며 한 시점을 본다', async () => {
     const info = await db.readSnapshot(async (tx) => {

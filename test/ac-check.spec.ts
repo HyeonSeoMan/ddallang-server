@@ -134,6 +134,29 @@ describe('AC 검사 스크립트: 실행될 시험 사례 (리뷰 F01·F02)', ()
     ]);
   });
 
+  it('표를 알 수 없는 it.each·describe.each(변수, 전개, 호출)는 정적 모드에서 덮지 않는다', () => {
+    expect(covered(`const table = []; it.each(table)('[AC-ROOM-001-1] x', () => {});`)).toEqual([
+      ['AC-ROOM-001-1', false],
+    ]);
+    expect(covered(`it.each([...[]])('[AC-ROOM-001-1] x', () => {});`)).toEqual([
+      ['AC-ROOM-001-1', false],
+    ]);
+    expect(covered(`it.each(make())('[AC-ROOM-001-1] x', () => {});`)).toEqual([
+      ['AC-ROOM-001-1', false],
+    ]);
+    expect(
+      covered(
+        `const t = [1]; describe.each(t)('[AC-ROOM-001-1] x', () => { it('a', () => {}); });`,
+      ),
+    ).toEqual([['AC-ROOM-001-1', false]]);
+    expect(covered(`it.concurrent.each([])('[AC-ROOM-001-1] x', () => {});`)).toEqual([
+      ['AC-ROOM-001-1', false],
+    ]);
+    expect(covered(`it.skip.each([1])('[AC-ROOM-001-1] x', () => {});`)).toEqual([
+      ['AC-ROOM-001-1', false],
+    ]);
+  });
+
   it('치환을 가로지르는 템플릿 조각을 이어 붙여 태그를 만들지 않는다', () => {
     expect(tagsOf('it(`[AC-ROOM-${1}001-1] x`, () => {});')).toEqual([]);
     expect(tagsOf('it(`[AC-ROOM-001-1] x ${1}`, () => {});')).toEqual(['AC-ROOM-001-1']);
@@ -271,6 +294,14 @@ describe('AC 검사 스크립트: 시험 실행 건강 상태·필터 (리뷰 F0
       { kind: 'test-run-failed', failedTests: 0, failedSuites: 1 },
     ]);
     expect(run1(passingAll([], false)).ok).toBe(false);
+  });
+
+  it('.only는 results 모드에서도 실패다(다른 시험을 가리는 회귀를 막는다, 리뷰 N01)', () => {
+    const tags = scan(`describe('x', () => { test.only('y', () => {}); });`);
+    const json = passingAll();
+    const r = evaluate({ rows, tags, results: tagsFromResults(json), health: resultsHealth(json) });
+    expect(r.ok).toBe(false);
+    expect(r.problems.map((p) => p.kind)).toEqual(['only']);
   });
 
   it('알 수 없는 --task·--spec은 실패하고 --allow-empty로만 AC 없는 기반 Task를 통과시킨다', () => {
