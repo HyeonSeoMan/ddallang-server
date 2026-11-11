@@ -13,6 +13,12 @@ import {
 import { toMemberDto, type RoomDto, type RoomMemberDto } from '../common/domain/dto.js';
 import { JsonBody, type BodyInput } from '../common/http/json-body.js';
 import { ApiErrorResponses, ApiIdentityKey } from '../common/swagger-docs.js';
+import {
+  ROOM_MEMBER_SCHEMA,
+  ROOM_SCHEMA,
+  ROOM_SUMMARY_SCHEMA,
+  obj,
+} from '../common/swagger-schemas.js';
 import { RoomsService, type JoinResult } from './rooms.service.js';
 
 @ApiTags('rooms')
@@ -35,7 +41,11 @@ export class RoomsController {
       },
     },
   })
-  @ApiResponse({ status: 201, description: '{ room, me }' })
+  @ApiResponse({
+    status: 201,
+    description: '방과 방장 RoomMember',
+    schema: obj({ room: ROOM_SCHEMA, me: ROOM_MEMBER_SCHEMA }),
+  })
   @ApiErrorResponses(401, 422)
   create(
     @CurrentIdentity() identity: IdentityContext,
@@ -48,7 +58,11 @@ export class RoomsController {
   @UseGuards(RoomMemberGuard)
   @ApiIdentityKey()
   @ApiOperation({ summary: '방 조회 (S1 §4.4)' })
-  @ApiResponse({ status: 200, description: '{ room, me }' })
+  @ApiResponse({
+    status: 200,
+    description: '방과 요청자',
+    schema: obj({ room: ROOM_SCHEMA, me: ROOM_MEMBER_SCHEMA }),
+  })
   @ApiErrorResponses(401, 404)
   async get(
     @CurrentMember() member: RoomMemberContext,
@@ -70,7 +84,18 @@ export class InvitesController {
   @ApiOperation({
     summary: '초대 링크 조회 (S1 §4.2). Authorization은 선택, 형식이 틀리면 키 없음으로 본다',
   })
-  @ApiResponse({ status: 200, description: '{ room: { name, unit, status }, isMember }' })
+  @ApiResponse({
+    status: 200,
+    description: '입장 전 공개 정보(이름·정산 단위·상태)와 isMember',
+    schema: obj({
+      room: obj({
+        name: { type: 'string' },
+        unit: { type: 'string' },
+        status: { type: 'string', enum: ['IN_PROGRESS', 'ENDED'] },
+      }),
+      isMember: { type: 'boolean' },
+    }),
+  })
   @ApiErrorResponses(404)
   invite(
     @Param('inviteCode') inviteCode: string,
@@ -91,8 +116,16 @@ export class InvitesController {
   @ApiIdentityKey()
   @ApiOperation({ summary: '입장 (S1 §4.3). 같은 키면 200 복원, 새 RoomMember면 201' })
   @ApiBody({ schema: { type: 'object', properties: { nickname: { type: 'string' } } } })
-  @ApiResponse({ status: 200, description: '복원: { room: { id, name, unit, status }, me }' })
-  @ApiResponse({ status: 201, description: '신규: { room, me }' })
+  @ApiResponse({
+    status: 200,
+    description: '같은 키로 복원',
+    schema: obj({ room: ROOM_SUMMARY_SCHEMA, me: ROOM_MEMBER_SCHEMA }),
+  })
+  @ApiResponse({
+    status: 201,
+    description: '새 RoomMember',
+    schema: obj({ room: ROOM_SUMMARY_SCHEMA, me: ROOM_MEMBER_SCHEMA }),
+  })
   @ApiErrorResponses(401, 404, 409, 422)
   async join(
     @Param('inviteCode') inviteCode: string,

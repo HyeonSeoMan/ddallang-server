@@ -8,6 +8,7 @@ const valid = {
   NODE_ENV: 'test',
   CORS_ORIGINS: 'http://localhost:3000',
   DATABASE_URL: 'postgresql://u:secret-pw@localhost:5432/db',
+  CURSOR_KEY: Buffer.alloc(32, 1).toString('base64'),
 };
 
 async function freePort(): Promise<number> {

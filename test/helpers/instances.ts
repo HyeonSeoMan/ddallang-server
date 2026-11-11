@@ -58,6 +58,7 @@ async function startOne(opts: StartOptions): Promise<Instance> {
     PORT: String(port),
     CORS_ORIGINS: 'http://localhost:3000',
     DATABASE_URL: opts.databaseUrl,
+    CURSOR_KEY: Buffer.alloc(32, 7).toString('base64'), // 시험용 고정 키(비밀 아님)
     DB_POOL_MAX: '3',
     ...opts.env,
   };

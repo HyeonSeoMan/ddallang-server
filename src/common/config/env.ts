@@ -13,6 +13,8 @@ const rawSchema = z.object({
     .string()
     .min(1)
     .refine((v) => /^postgres(ql)?:\/\//.test(v), 'postgresql:// 형식이어야 한다'),
+  /** 커서 AEAD 키(AES-256-GCM): 32바이트를 base64(또는 base64url)로 인코딩한 값. 교체하면 진행 중인 커서가 무효가 되어도 된다(PD-12). */
+  CURSOR_KEY: z.string().min(1),
   DB_LOCK_TIMEOUT_MS: positiveInt(5_000),
   DB_STATEMENT_TIMEOUT_MS: positiveInt(10_000),
   REQUEST_TIMEOUT_MS: positiveInt(30_000),
@@ -24,6 +26,8 @@ export type Env = {
   PORT: number;
   CORS_ORIGINS: string[];
   DATABASE_URL: string;
+  /** 디코드한 32바이트 커서 키 */
+  CURSOR_KEY: Buffer;
   DB_LOCK_TIMEOUT_MS: number;
   DB_STATEMENT_TIMEOUT_MS: number;
   /** BE-F2에서는 Prisma 트랜잭션 제한 시간으로만 쓴다. 서버의 요청 제한에는 아직 연결되지 않았다. */
@@ -59,5 +63,9 @@ export function loadEnv(raw: Record<string, string | undefined>): Env {
       'DB_LOCK_TIMEOUT_MS < DB_STATEMENT_TIMEOUT_MS < REQUEST_TIMEOUT_MS < 3600000(1시간)이어야 한다',
     ]);
   }
-  return { ...rest, CORS_ORIGINS: listed };
+  const cursorKey = Buffer.from(rest.CURSOR_KEY, 'base64');
+  if (cursorKey.length !== 32) {
+    throw new EnvValidationError(['CURSOR_KEY: base64로 인코딩한 32바이트여야 한다']);
+  }
+  return { ...rest, CURSOR_KEY: cursorKey, CORS_ORIGINS: listed };
 }
