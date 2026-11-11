@@ -47,13 +47,22 @@ function methodNames(method: number): string[] {
   return method === RequestMethod.ALL ? ALL_METHODS : [RequestMethod[method]!];
 }
 
+/**
+ * 경로 매개변수 형식 제약. 서버가 만드는 거래 ID는 22자 base64url이다. `POST …/transactions/batch` 같은
+ * 일괄 등록·정정 경로는 정의하지 않으므로 404여야 하는데(S2 §4.4), 제약이 없으면 `batch`가 거래 ID로 매칭되어
+ * 405가 된다. 그래서 ID 모양이 아닌 값은 그 경로가 없는 것으로 판정한다.
+ */
+export const PARAM_CONSTRAINTS: Record<string, string> = {
+  transactionId: '[A-Za-z0-9_-]{22}',
+};
+
 /** 패턴을 Express와 같은 규칙(대소문자 무시, 끝 슬래시 허용)의 정규식으로 바꾼다. */
 export function compilePattern(pattern: string): RegExp {
   const body = pattern
     .split('/')
     .map((seg) => {
       if (seg === '*') return '.*';
-      if (seg.startsWith(':')) return '[^/]+';
+      if (seg.startsWith(':')) return PARAM_CONSTRAINTS[seg.slice(1)] ?? '[^/]+';
       return seg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     })
     .join('/');

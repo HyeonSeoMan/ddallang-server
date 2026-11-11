@@ -56,3 +56,40 @@ export const toParticipantDto = (
   order: p.order,
   createdAt: p.createdAt.toISOString(),
 });
+
+/** S2 §2.1의 클라이언트 노출 거래. 원본 값·삭제 정보·순번은 서버만 가진다. */
+export interface TransactionDto {
+  id: string;
+  payerId: string;
+  payeeId: string;
+  amount: number;
+  reason: string | null;
+  round: string | null;
+  authorId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function toTransactionDto(t: {
+  id: string;
+  payerId: string;
+  payeeId: string;
+  amount: bigint;
+  reason: string | null;
+  round: string | null;
+  authorId: string;
+  createdAt: Date;
+  updatedAt: Date;
+}): TransactionDto {
+  return {
+    id: t.id,
+    payerId: t.payerId,
+    payeeId: t.payeeId,
+    amount: Number(t.amount), // 최대 999,999,999라 안전 정수 범위 안이다(NFR-009)
+    reason: t.reason,
+    round: t.round,
+    authorId: t.authorId,
+    createdAt: t.createdAt.toISOString(),
+    updatedAt: t.updatedAt.toISOString(),
+  };
+}
