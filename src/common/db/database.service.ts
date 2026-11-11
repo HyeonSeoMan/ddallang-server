@@ -10,6 +10,24 @@ export type DbTimeouts = Pick<
   'DB_LOCK_TIMEOUT_MS' | 'DB_STATEMENT_TIMEOUT_MS' | 'REQUEST_TIMEOUT_MS'
 >;
 
+/** S5 §4.2 이벤트 종류와 식별자. 내용(금액·사유·닉네임 등)은 싣지 않는다(R-I3). */
+export type RoomEvent =
+  | {
+      event: 'transaction.created' | 'transaction.updated' | 'transaction.deleted';
+      transactionId: string;
+    }
+  | { event: 'participant.created' | 'participant.status_changed'; participantId: string }
+  | { event: 'room.ended' };
+
+/** 변경 콜백의 결과. `event`가 있을 때만(변경이 실제로 있을 때만) `revision`을 소비하고 통지한다. */
+export interface MutationOutcome<T> {
+  value: T;
+  event?: RoomEvent;
+}
+
+/** PD-5: 모든 방 변경 통지가 오가는 PostgreSQL 채널. */
+export const ROOM_EVENTS_CHANNEL = 'room_events';
+
 /** 잠글 방이 없다. 호출자가 404 등으로 옮긴다(S1 §3.3). */
 export class RoomNotFoundError extends Error {
   constructor(readonly roomId: string) {
@@ -52,6 +70,30 @@ export class DatabaseService {
         SELECT "id" FROM "Room" WHERE "id" = ${roomId} FOR UPDATE`;
       if (rows.length === 0) throw new RoomNotFoundError(roomId);
       return fn(tx);
+    });
+  }
+
+  /**
+   * 변경 트랜잭션 파이프라인(PD-3~PD-5, S5 §6.1): 방 잠금 → 호출자 변경 → **변경이 실제로 있을 때만**
+   * `Room.revision` + 1 → 같은 트랜잭션에서 `pg_notify` → 커밋. PostgreSQL은 통지를 커밋될 때만 전달하므로
+   * 커밋 전에 나가거나 롤백된 변경의 이벤트가 나가는 일이 없다. 거부(콜백이 던짐)·멱등 재전송·값이 같은
+   * 변경(`event` 없음)은 `revision`을 소비하지 않고 통지하지 않는다. 통지에는 식별자와 종류만 싣는다.
+   * 반환의 `revision`은 소비했을 때만 값이 있다.
+   */
+  async withRoomMutation<T>(
+    roomId: string,
+    fn: (tx: DbTx) => Promise<MutationOutcome<T>>,
+  ): Promise<{ value: T; revision: number | null }> {
+    return this.withRoomLock(roomId, async (tx) => {
+      const { value, event } = await fn(tx);
+      if (!event) return { value, revision: null };
+      const rows = await tx.$queryRaw<{ revision: number }[]>`
+        UPDATE "Room" SET "revision" = "revision" + 1 WHERE "id" = ${roomId} RETURNING "revision"`;
+      const revision = rows[0]!.revision;
+      const serverTime = (await this.dbNow(tx)).toISOString();
+      const payload = JSON.stringify({ ...event, roomId, revision, serverTime });
+      await tx.$executeRaw`SELECT pg_notify(${ROOM_EVENTS_CHANNEL}, ${payload})`;
+      return { value, revision };
     });
   }
 
