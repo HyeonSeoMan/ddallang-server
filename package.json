@@ -1,0 +1,49 @@
+{
+  "name": "ddallang-server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "DDALLANG backend (NestJS)",
+  "packageManager": "pnpm@12.18.0",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "deps:check": "depcruise src --config .dependency-cruiser.cjs",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@nestjs/common": "12.4.2",
+    "@nestjs/core": "12.4.2",
+    "@nestjs/platform-express": "12.4.2",
+    "@nestjs/swagger": "12.1.1",
+    "nestjs-pino": "5.3.1",
+    "pino": "10.4.0",
+    "pino-http": "11.0.0",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@nestjs/testing": "12.4.2",
+    "@swc/core": "1.16.22",
+    "@types/express": "5.0.6",
+    "@types/node": "22.20.5",
+    "@types/supertest": "7.2.1",
+    "dependency-cruiser": "18.7.2",
+    "eslint": "10.14.0",
+    "prettier": "3.9.10",
+    "supertest": "7.3.2",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.2",
+    "unplugin-swc": "2.0.0",
+    "vitest": "5.1.0"
+  }
+}
