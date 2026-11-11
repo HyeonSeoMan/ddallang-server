@@ -1,1 +1,0 @@
-# 마이그레이션은 소유 Task가 만든다. CHECK·부분 인덱스는 migration.sql에 직접 쓴다(PD-2).

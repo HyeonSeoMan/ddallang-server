@@ -1,5 +1,6 @@
-// BE-F2: 모델 없는 골격. 모델과 마이그레이션은 소유 Task가 추가한다(plan §3 "스키마 소유").
-// CHECK 제약·부분 인덱스는 Prisma가 표현하지 못하므로 SQL 마이그레이션(prisma/migrations/*/migration.sql)에 직접 쓴다(PD-2).
+// 스키마 소유(plan §3): Room·RoomMember·Participant 기본 필드는 BE-S1-1이 만든다.
+// Room.revision은 BE-F7, Transaction·nextTxnSeq·lastTxnCreatedAt은 BE-S2-1, IdempotencyRecord는 BE-F6, StreamLease는 BE-S5-6이 추가한다.
+// CHECK 제약과 부분 인덱스는 Prisma가 표현하지 못하므로 SQL 마이그레이션(prisma/migrations/*/migration.sql)에 직접 쓴다(PD-2).
 generator client {
   provider = "prisma-client"
   output   = "../src/generated/prisma"
@@ -7,4 +8,54 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+}
+
+/// 방. name·unit·inviteCode는 생성 뒤 변하지 않는다(S1 §2.2 I6).
+model Room {
+  id         String   @id
+  name       String
+  unit       String
+  /// IN_PROGRESS | ENDED (CHECK)
+  status     String   @default("IN_PROGRESS")
+  inviteCode String   @unique
+  createdAt  DateTime @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+
+  members      RoomMember[]
+  participants Participant[]
+}
+
+/// 익명 접속 주체. 신원 키는 SHA-256 해시(소문자 hex)로만 저장한다(PD-14).
+model RoomMember {
+  id              String   @id
+  roomId          String
+  /// NFC 정규화한 닉네임
+  nickname        String
+  /// 닉네임 비교 키(S1 §3.2): A-Z만 소문자
+  nicknameKey     String
+  isHost          Boolean
+  identityKeyHash String
+  createdAt       DateTime @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+
+  room Room @relation(fields: [roomId], references: [id], onDelete: Restrict)
+
+  @@unique([roomId, identityKeyHash])
+  @@unique([roomId, nicknameKey])
+}
+
+/// 게임 참여자. RoomMember와 잇는 필드·관계는 없다(S1 §2.2 I2).
+model Participant {
+  id          String   @id
+  roomId      String
+  nickname    String
+  nicknameKey String
+  /// ACTIVE | INACTIVE (CHECK)
+  status      String   @default("ACTIVE")
+  /// 방 안에서 유일한 양의 정수, 한 번 부여되면 바뀌지 않는다
+  order       Int
+  createdAt   DateTime @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+
+  room Room @relation(fields: [roomId], references: [id], onDelete: Restrict)
+
+  @@unique([roomId, order])
+  @@unique([roomId, nicknameKey])
 }

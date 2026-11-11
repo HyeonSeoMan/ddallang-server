@@ -9,7 +9,7 @@ import pg from 'pg';
  */
 export interface IsolatedDb {
   schema: string;
-  /** `?options=-c search_path=<schema>`가 붙은 연결 문자열 */
+  /** `options=-c search_path=<schema>`(raw SQL)와 `schema=<schema>`(Prisma 모델)가 붙은 연결 문자열 */
   databaseUrl: string;
   /** 시험 전용 DDL·시드를 이 스키마에서 실행한다(마이그레이션에 들어가지 않는 구조용). */
   fixtures(sql: string): Promise<void>;
@@ -58,7 +58,8 @@ async function connect(url: string): Promise<pg.Client> {
 
 export function withSearchPath(url: string, schema: string): string {
   const u = new URL(url);
-  u.searchParams.set('options', `-c search_path=${schema}`);
+  u.searchParams.set('options', `-c search_path=${schema}`); // raw SQL
+  u.searchParams.set('schema', schema); // Prisma 생성 모델이 만드는 질의(`"schema"."Table"`)
   return u.toString();
 }
 
