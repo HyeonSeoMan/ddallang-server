@@ -62,7 +62,7 @@ docker compose up -d         # PostgreSQL 16
 pnpm build && pnpm start     # 또는 개발 중: pnpm build 후 NODE_ENV=development node dist/main.js
 ```
 
-환경 변수는 시작할 때 검증하며 누락되면 기동하지 않습니다(`.env.example` 참고): `NODE_ENV`(`development`|`test`|`production`), `PORT`(기본 3001), `CORS_ORIGINS`, `DATABASE_URL`, `DB_LOCK_TIMEOUT_MS`(5000), `DB_STATEMENT_TIMEOUT_MS`(10000), `REQUEST_TIMEOUT_MS`(30000), `DB_POOL_MAX`(10). 시간 제한은 `lock < statement < request < 1시간`이어야 합니다.
+환경 변수는 시작할 때 검증하며 누락되면 기동하지 않습니다(`.env.example` 참고): `NODE_ENV`(`development`|`test`|`production`), `PORT`(기본 3001), `CORS_ORIGINS`, `DATABASE_URL`, `CURSOR_KEY`(커서 AEAD 키, base64 32바이트), `DB_LOCK_TIMEOUT_MS`(5000), `DB_STATEMENT_TIMEOUT_MS`(10000), `REQUEST_TIMEOUT_MS`(30000), `DB_POOL_MAX`(10). 시간 제한은 `lock < statement < request < 1시간`이어야 합니다.
 
 마이그레이션은 `prisma/migrations/*/migration.sql`(CHECK 제약·부분 인덱스 포함)이며 `pnpm exec prisma migrate deploy`로 적용합니다. `migrate reset`과 `--accept-data-loss`는 쓰지 않습니다.
 
@@ -98,6 +98,21 @@ test/          계약·동시성·제약 시험, 다중 프로세스 하네스(t
 - **오류 형식**: `{ error: { code, message, details[] } }`. 라우트 판정(404 `ROUTE_NOT_FOUND`, 405 `NOT_SUPPORTED`+`Allow`)은 인증과 Swagger보다 앞서며, 본문 JSON 파싱 실패는 검증 차례(422)에서 판정합니다.
 - **시험**: 시험마다 임시 스키마(`search_path`와 Prisma `schema`)를 만들고, 서버를 별도 프로세스 2개 이상 띄워 같은 DB에서 동시성을 검증합니다.
 
+### 성능 측정 (BE-S3-4, 로컬 개발 환경, 방당 거래 1,000건·참여자 10명, 각 40회)
+
+| 응답                   | p50   | p95   |
+| ---------------------- | ----- | ----- |
+| 목록 첫 페이지         | 2.5ms | 3.0ms |
+| 목록 깊은 페이지(커서) | 2.7ms | 3.4ms |
+| 목록 필터(참여자 1명)  | 2.8ms | 3.3ms |
+| 누적 손익              | 3.1ms | 3.7ms |
+
+(HTTP 왕복 시간이며 DB와 앱이 같은 기기에 있다. 목록 질의는 `(roomId, createdAt DESC, seq DESC)` 부분 인덱스로 정렬 없이 읽힌다.)
+
+## Swagger
+
+`NODE_ENV=development`에서 `/api-docs`(UI)와 `/api-docs-json`이 열린다. 구현된 모든 엔드포인트는 요약, 요청 본문·쿼리·헤더, 성공 응답 스키마, 공통 오류 응답 스키마, 인증 방식(`Authorization: Bearer`)을 갖고 시험이 이를 확인한다. **문서는 비권위 참고용이며 계약 원본은 Spec이다.** API가 바뀌면 같은 변경에서 Swagger와 이 README의 표를 함께 갱신한다.
+
 ## 알려진 한계와 보류 항목
 
 - 멱등 기록 정리(`expiresAt + 1시간` 이후 삭제)는 10분 주기 작업이며 `test` 환경에서는 돌지 않습니다.
@@ -109,4 +124,4 @@ test/          계약·동시성·제약 시험, 다중 프로세스 하네스(t
 
 ## 계획
 
-`S3(조회·손익) → S5(SSE) → S4(종료·정산) → BE-Z1(통합 검증, 개발 종료 뒤 Codex 독립 검수)`. 자세한 Task 표는 `ddallang`의 `docs/plans/server/tasks.md`를 봅니다.
+`S5(SSE) → S4(종료·정산) → BE-Z1(통합 검증, 개발 종료 뒤 Codex 독립 검수)`. 자세한 Task 표는 `ddallang`의 `docs/plans/server/tasks.md`를 봅니다.

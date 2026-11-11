@@ -5,6 +5,7 @@ const valid = {
   NODE_ENV: 'development',
   CORS_ORIGINS: 'http://localhost:3000',
   DATABASE_URL: 'postgresql://u:secret-pw@localhost:5432/db',
+  CURSOR_KEY: Buffer.alloc(32, 1).toString('base64'),
 };
 
 describe('loadEnv (PD-18)', () => {
@@ -19,11 +20,14 @@ describe('loadEnv (PD-18)', () => {
     expect(env.CORS_ORIGINS).toEqual(['https://a.example', 'https://b.example']);
   });
 
-  it.each(['NODE_ENV', 'DATABASE_URL', 'CORS_ORIGINS'])('%s 누락이면 실패한다', (key) => {
-    const raw: Record<string, string | undefined> = { ...valid };
-    delete raw[key];
-    expect(() => loadEnv(raw)).toThrow(EnvValidationError);
-  });
+  it.each(['NODE_ENV', 'DATABASE_URL', 'CORS_ORIGINS', 'CURSOR_KEY'])(
+    '%s 누락이면 실패한다',
+    (key) => {
+      const raw: Record<string, string | undefined> = { ...valid };
+      delete raw[key];
+      expect(() => loadEnv(raw)).toThrow(EnvValidationError);
+    },
+  );
 
   it.each([undefined, '', 'staging', 'Development', 'prod'])(
     'NODE_ENV=%j는 허용 밖이라 실패한다',
@@ -104,6 +108,20 @@ describe('loadEnv (PD-18)', () => {
       'DB_POOL_MAX',
     ]) {
       expect(() => loadEnv({ ...valid, [key]: bad })).toThrow(EnvValidationError);
+    }
+  });
+
+  it('CURSOR_KEY는 base64로 인코딩한 32바이트여야 하고 디코드한 Buffer로 노출한다', () => {
+    const env = loadEnv(valid);
+    expect(env.CURSOR_KEY).toBeInstanceOf(Buffer);
+    expect(env.CURSOR_KEY).toHaveLength(32);
+    for (const bad of [
+      Buffer.alloc(16).toString('base64'),
+      Buffer.alloc(33).toString('base64'),
+      'x',
+      '!!!!',
+    ]) {
+      expect(() => loadEnv({ ...valid, CURSOR_KEY: bad })).toThrow(/CURSOR_KEY/);
     }
   });
 });

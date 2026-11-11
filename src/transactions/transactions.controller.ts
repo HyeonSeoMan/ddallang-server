@@ -18,6 +18,7 @@ import {
 } from '../common/auth/room-member.guard.js';
 import { JsonBody, type BodyInput } from '../common/http/json-body.js';
 import { ApiErrorResponses, ApiIdentityKey } from '../common/swagger-docs.js';
+import { TRANSACTION_SCHEMA, obj } from '../common/swagger-schemas.js';
 import { TransactionsService, type Reply, type Requester } from './transactions.service.js';
 
 type Headers_ = Record<string, string | string[] | undefined>;
@@ -71,7 +72,11 @@ export class TransactionsController {
       },
     },
   })
-  @ApiResponse({ status: 201, description: '{ transaction }' })
+  @ApiResponse({
+    status: 201,
+    description: '생성된 거래. 같은 키 재전송이면 Idempotent-Replayed: true와 최초 결과',
+    schema: obj({ transaction: TRANSACTION_SCHEMA }),
+  })
   @ApiErrorResponses(401, 404, 409, 422)
   async create(
     @CurrentMember() member: RoomMemberContext,
@@ -98,7 +103,11 @@ export class TransactionsController {
       },
     },
   })
-  @ApiResponse({ status: 200, description: '{ transaction }' })
+  @ApiResponse({
+    status: 200,
+    description: '수정된(또는 값이 같아 그대로인) 거래',
+    schema: obj({ transaction: TRANSACTION_SCHEMA }),
+  })
   @ApiErrorResponses(401, 403, 404, 409, 422)
   async update(
     @CurrentMember() member: RoomMemberContext,
@@ -116,7 +125,14 @@ export class TransactionsController {
   @Delete(':transactionId')
   @apply(...idempotencyHeaders())
   @ApiOperation({ summary: '거래 삭제 (S2 §4.3): 행을 지우지 않는다. 작성자 또는 방장' })
-  @ApiResponse({ status: 200, description: '{ transactionId, deletedAt }' })
+  @ApiResponse({
+    status: 200,
+    description: '삭제 결과',
+    schema: obj({
+      transactionId: { type: 'string' },
+      deletedAt: { type: 'string', format: 'date-time' },
+    }),
+  })
   @ApiErrorResponses(401, 403, 404, 409, 422)
   async remove(
     @CurrentMember() member: RoomMemberContext,

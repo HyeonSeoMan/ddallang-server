@@ -9,6 +9,7 @@ import type { ParticipantDto } from '../common/domain/dto.js';
 import { ApiError } from '../common/errors/api-error.js';
 import { JsonBody, type BodyInput } from '../common/http/json-body.js';
 import { ApiErrorResponses, ApiIdentityKey } from '../common/swagger-docs.js';
+import { PARTICIPANT_SCHEMA, arrayOf, obj } from '../common/swagger-schemas.js';
 import { ParticipantsService } from './participants.service.js';
 
 /** 방장 전용 동작(S1 §5.1)은 비방장에게 `403 HOST_ONLY`다. 방 멤버에게만 도달하므로 방 정보를 드러내지 않는다. */
@@ -25,7 +26,11 @@ export class ParticipantsController {
 
   @Get()
   @ApiOperation({ summary: '참여자 목록 (S1 §4.5): order 오름차순, 비활성 포함' })
-  @ApiResponse({ status: 200, description: '{ participants: Participant[] }' })
+  @ApiResponse({
+    status: 200,
+    description: 'order 오름차순, 비활성 포함',
+    schema: obj({ participants: arrayOf(PARTICIPANT_SCHEMA) }),
+  })
   @ApiErrorResponses(401, 404)
   async list(
     @CurrentMember() member: RoomMemberContext,
@@ -43,7 +48,11 @@ export class ParticipantsController {
       properties: { nickname: { type: 'string' } },
     },
   })
-  @ApiResponse({ status: 201, description: '{ participant }' })
+  @ApiResponse({
+    status: 201,
+    description: '등록된 참여자(ACTIVE)',
+    schema: obj({ participant: PARTICIPANT_SCHEMA }),
+  })
   @ApiErrorResponses(401, 403, 404, 409, 422)
   async create(
     @CurrentMember() member: RoomMemberContext,
@@ -62,7 +71,11 @@ export class ParticipantsController {
       properties: { status: { type: 'string', enum: ['ACTIVE', 'INACTIVE'] } },
     },
   })
-  @ApiResponse({ status: 200, description: '{ participant }' })
+  @ApiResponse({
+    status: 200,
+    description: '현재 참여자(같은 값이면 변경 없이 그대로)',
+    schema: obj({ participant: PARTICIPANT_SCHEMA }),
+  })
   @ApiErrorResponses(401, 403, 404, 409, 422)
   async patch(
     @CurrentMember() member: RoomMemberContext,

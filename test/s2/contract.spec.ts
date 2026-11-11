@@ -41,12 +41,12 @@ describe('S2 §4.4 존재하지 않는 동작', () => {
     }
   });
 
-  it('거래 컬렉션 경로의 PUT·PATCH·DELETE는 405 Allow: POST(목록은 S3가 추가하면 GET, POST)', async () => {
+  it('거래 컬렉션 경로의 PUT·PATCH·DELETE는 405 Allow: GET, POST(S3 목록이 GET을 더했다)', async () => {
     const r = await setupRoom(s.http);
     for (const m of ['put', 'patch', 'delete'] as const) {
       const res = await s.http[m](`/rooms/${r.c.roomId}/transactions`).set(auth(r.c.key)).send({});
       expectApiError(res, 405, 'NOT_SUPPORTED');
-      expect(res.headers.allow).toBe('POST');
+      expect(res.headers.allow).toBe('GET, POST');
     }
   });
 
