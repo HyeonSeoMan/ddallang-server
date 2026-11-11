@@ -17,7 +17,7 @@ import {
   type RoomMemberContext,
 } from '../common/auth/room-member.guard.js';
 import { JsonBody, type BodyInput } from '../common/http/json-body.js';
-import { ApiErrorResponses, ApiIdentityKey } from '../common/swagger-docs.js';
+import { ApiErrors, ApiIdentityKey, ApiRoomIdParam } from '../common/swagger-docs.js';
 import { TRANSACTION_SCHEMA, obj } from '../common/swagger-schemas.js';
 import { TransactionsService, type Reply, type Requester } from './transactions.service.js';
 
@@ -52,6 +52,7 @@ function send(res: Response, reply: Reply): unknown {
 @Controller('rooms/:roomId/transactions')
 @UseGuards(RoomMemberGuard)
 @ApiIdentityKey()
+@ApiRoomIdParam()
 export class TransactionsController {
   constructor(private readonly transactions: TransactionsService) {}
 
@@ -62,6 +63,13 @@ export class TransactionsController {
   @ApiBody({
     schema: {
       type: 'object',
+      example: {
+        payerId: '<지급자 Participant ID>',
+        payeeId: '<수취자 Participant ID>',
+        amount: 15000,
+        reason: '점심',
+        round: '1R',
+      },
       required: ['payerId', 'payeeId', 'amount'],
       properties: {
         payerId: { type: 'string' },
@@ -73,11 +81,26 @@ export class TransactionsController {
     },
   })
   @ApiResponse({
+    headers: {
+      'Idempotent-Replayed': {
+        description: '같은 키·같은 내용의 재전송이면 true(저장된 최초 결과를 그대로 돌려준다)',
+        schema: { type: 'string', example: 'true' },
+      },
+    },
     status: 201,
     description: '생성된 거래. 같은 키 재전송이면 Idempotent-Replayed: true와 최초 결과',
     schema: obj({ transaction: TRANSACTION_SCHEMA }),
   })
-  @ApiErrorResponses(401, 404, 409, 422)
+  @ApiErrors(
+    'UNAUTHENTICATED',
+    'ROOM_NOT_FOUND',
+    'VALIDATION_FAILED',
+    'IDEMPOTENCY_KEY_EXPIRED',
+    'IDEMPOTENCY_CONFLICT',
+    'GAME_ENDED',
+    'PARTICIPANT_INACTIVE',
+    'TRANSACTION_LIMIT_EXCEEDED',
+  )
   async create(
     @CurrentMember() member: RoomMemberContext,
     @Headers() headers: Headers_,
@@ -95,6 +118,7 @@ export class TransactionsController {
   @ApiBody({
     schema: {
       type: 'object',
+      example: { amount: 12000, reason: '점심(수정)', round: '1R' },
       required: ['amount'],
       properties: {
         amount: { type: 'integer', minimum: 1, maximum: 999999999 },
@@ -104,11 +128,27 @@ export class TransactionsController {
     },
   })
   @ApiResponse({
+    headers: {
+      'Idempotent-Replayed': {
+        description: '같은 키·같은 내용의 재전송이면 true(저장된 최초 결과를 그대로 돌려준다)',
+        schema: { type: 'string', example: 'true' },
+      },
+    },
     status: 200,
     description: '수정된(또는 값이 같아 그대로인) 거래',
     schema: obj({ transaction: TRANSACTION_SCHEMA }),
   })
-  @ApiErrorResponses(401, 403, 404, 409, 422)
+  @ApiErrors(
+    'UNAUTHENTICATED',
+    'ROOM_NOT_FOUND',
+    'TRANSACTION_NOT_FOUND',
+    'NOT_AUTHOR_OR_HOST',
+    'VALIDATION_FAILED',
+    'IDEMPOTENCY_KEY_EXPIRED',
+    'IDEMPOTENCY_CONFLICT',
+    'GAME_ENDED',
+    'TRANSACTION_DELETED',
+  )
   async update(
     @CurrentMember() member: RoomMemberContext,
     @Param('transactionId') transactionId: string,
@@ -126,6 +166,12 @@ export class TransactionsController {
   @apply(...idempotencyHeaders())
   @ApiOperation({ summary: '거래 삭제 (S2 §4.3): 행을 지우지 않는다. 작성자 또는 방장' })
   @ApiResponse({
+    headers: {
+      'Idempotent-Replayed': {
+        description: '같은 키·같은 내용의 재전송이면 true(저장된 최초 결과를 그대로 돌려준다)',
+        schema: { type: 'string', example: 'true' },
+      },
+    },
     status: 200,
     description: '삭제 결과',
     schema: obj({
@@ -133,7 +179,17 @@ export class TransactionsController {
       deletedAt: { type: 'string', format: 'date-time' },
     }),
   })
-  @ApiErrorResponses(401, 403, 404, 409, 422)
+  @ApiErrors(
+    'UNAUTHENTICATED',
+    'ROOM_NOT_FOUND',
+    'TRANSACTION_NOT_FOUND',
+    'NOT_AUTHOR_OR_HOST',
+    'VALIDATION_FAILED',
+    'IDEMPOTENCY_KEY_EXPIRED',
+    'IDEMPOTENCY_CONFLICT',
+    'GAME_ENDED',
+    'TRANSACTION_DELETED',
+  )
   async remove(
     @CurrentMember() member: RoomMemberContext,
     @Param('transactionId') transactionId: string,

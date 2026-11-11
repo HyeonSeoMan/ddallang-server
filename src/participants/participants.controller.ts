@@ -8,7 +8,7 @@ import {
 import type { ParticipantDto } from '../common/domain/dto.js';
 import { ApiError } from '../common/errors/api-error.js';
 import { JsonBody, type BodyInput } from '../common/http/json-body.js';
-import { ApiErrorResponses, ApiIdentityKey } from '../common/swagger-docs.js';
+import { ApiErrors, ApiIdentityKey, ApiRoomIdParam } from '../common/swagger-docs.js';
 import { PARTICIPANT_SCHEMA, arrayOf, obj } from '../common/swagger-schemas.js';
 import { ParticipantsService } from './participants.service.js';
 
@@ -21,6 +21,7 @@ function requireHost(member: RoomMemberContext): void {
 @Controller('rooms/:roomId/participants')
 @UseGuards(RoomMemberGuard)
 @ApiIdentityKey()
+@ApiRoomIdParam()
 export class ParticipantsController {
   constructor(private readonly participants: ParticipantsService) {}
 
@@ -31,7 +32,7 @@ export class ParticipantsController {
     description: 'order 오름차순, 비활성 포함',
     schema: obj({ participants: arrayOf(PARTICIPANT_SCHEMA) }),
   })
-  @ApiErrorResponses(401, 404)
+  @ApiErrors('UNAUTHENTICATED', 'ROOM_NOT_FOUND')
   async list(
     @CurrentMember() member: RoomMemberContext,
   ): Promise<{ participants: ParticipantDto[] }> {
@@ -44,6 +45,7 @@ export class ParticipantsController {
   @ApiBody({
     schema: {
       type: 'object',
+      example: { nickname: '철수' },
       required: ['nickname'],
       properties: { nickname: { type: 'string' } },
     },
@@ -53,7 +55,15 @@ export class ParticipantsController {
     description: '등록된 참여자(ACTIVE)',
     schema: obj({ participant: PARTICIPANT_SCHEMA }),
   })
-  @ApiErrorResponses(401, 403, 404, 409, 422)
+  @ApiErrors(
+    'UNAUTHENTICATED',
+    'HOST_ONLY',
+    'ROOM_NOT_FOUND',
+    'GAME_ENDED',
+    'VALIDATION_FAILED',
+    'NICKNAME_TAKEN',
+    'PARTICIPANT_LIMIT_EXCEEDED',
+  )
   async create(
     @CurrentMember() member: RoomMemberContext,
     @JsonBody() body: BodyInput,
@@ -67,6 +77,7 @@ export class ParticipantsController {
   @ApiBody({
     schema: {
       type: 'object',
+      example: { status: 'INACTIVE' },
       required: ['status'],
       properties: { status: { type: 'string', enum: ['ACTIVE', 'INACTIVE'] } },
     },
@@ -76,7 +87,14 @@ export class ParticipantsController {
     description: '현재 참여자(같은 값이면 변경 없이 그대로)',
     schema: obj({ participant: PARTICIPANT_SCHEMA }),
   })
-  @ApiErrorResponses(401, 403, 404, 409, 422)
+  @ApiErrors(
+    'UNAUTHENTICATED',
+    'HOST_ONLY',
+    'ROOM_NOT_FOUND',
+    'PARTICIPANT_NOT_FOUND',
+    'GAME_ENDED',
+    'VALIDATION_FAILED',
+  )
   async patch(
     @CurrentMember() member: RoomMemberContext,
     @Param('participantId') participantId: string,

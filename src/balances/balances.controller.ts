@@ -6,7 +6,7 @@ import {
   type RoomMemberContext,
 } from '../common/auth/room-member.guard.js';
 import type { TransactionDto } from '../common/domain/dto.js';
-import { ApiErrorResponses, ApiIdentityKey } from '../common/swagger-docs.js';
+import { ApiErrors, ApiIdentityKey, ApiRoomIdParam } from '../common/swagger-docs.js';
 import { BALANCE_SCHEMA, TRANSACTION_SCHEMA, arrayOf, obj } from '../common/swagger-schemas.js';
 import { BalancesService, type Balance } from './balances.service.js';
 
@@ -17,6 +17,7 @@ type Q = Record<string, string | string[] | undefined | Record<string, unknown>>
 @Controller('rooms/:roomId')
 @UseGuards(RoomMemberGuard)
 @ApiIdentityKey()
+@ApiRoomIdParam()
 export class BalancesController {
   constructor(private readonly balances: BalancesService) {}
 
@@ -30,7 +31,7 @@ export class BalancesController {
     description: '참여자별 순손익(모든 참여자, balance 내림차순·order 오름차순)',
     schema: obj({ balances: arrayOf(BALANCE_SCHEMA) }),
   })
-  @ApiErrorResponses(401, 404, 422)
+  @ApiErrors('UNAUTHENTICATED', 'ROOM_NOT_FOUND', 'VALIDATION_FAILED')
   async getBalances(
     @CurrentMember() member: RoomMemberContext,
     @Query() query: Q,
@@ -52,7 +53,7 @@ export class BalancesController {
       nextCursor: { type: 'string', nullable: true },
     }),
   })
-  @ApiErrorResponses(401, 404, 422)
+  @ApiErrors('UNAUTHENTICATED', 'ROOM_NOT_FOUND', 'VALIDATION_FAILED')
   list(
     @CurrentMember() member: RoomMemberContext,
     @Query() query: Q,
