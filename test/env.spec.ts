@@ -3,11 +3,12 @@ import { EnvValidationError, loadEnv } from '../src/common/config/env.js';
 
 const valid = {
   NODE_ENV: 'development',
+  CORS_ORIGINS: 'http://localhost:3000',
   DATABASE_URL: 'postgresql://u:secret-pw@localhost:5432/db',
 };
 
 describe('loadEnv (PD-18)', () => {
-  it('정상 값이면 기본값(PORT 3001, 개발 CORS)을 채운다', () => {
+  it('정상 값이면 PORT 기본값 3001을 채우고 출처를 나눈다', () => {
     const env = loadEnv(valid);
     expect(env.PORT).toBe(3001);
     expect(env.CORS_ORIGINS).toEqual(['http://localhost:3000']);
@@ -18,7 +19,7 @@ describe('loadEnv (PD-18)', () => {
     expect(env.CORS_ORIGINS).toEqual(['https://a.example', 'https://b.example']);
   });
 
-  it.each(['NODE_ENV', 'DATABASE_URL'])('%s 누락이면 실패한다', (key) => {
+  it.each(['NODE_ENV', 'DATABASE_URL', 'CORS_ORIGINS'])('%s 누락이면 실패한다', (key) => {
     const raw: Record<string, string | undefined> = { ...valid };
     delete raw[key];
     expect(() => loadEnv(raw)).toThrow(EnvValidationError);
@@ -31,12 +32,18 @@ describe('loadEnv (PD-18)', () => {
     },
   );
 
-  it.each(['test', 'production'])('%s에서는 CORS_ORIGINS가 필수다', (nodeEnv) => {
-    expect(() => loadEnv({ ...valid, NODE_ENV: nodeEnv })).toThrow(/CORS_ORIGINS/);
-    expect(
-      loadEnv({ ...valid, NODE_ENV: nodeEnv, CORS_ORIGINS: 'https://a.example' }).NODE_ENV,
-    ).toBe(nodeEnv);
-  });
+  it.each(['development', 'test', 'production'])(
+    '%s에서도 CORS_ORIGINS 누락·빈 값은 실패한다',
+    (nodeEnv) => {
+      const { CORS_ORIGINS: _omit, ...rest } = valid;
+      void _omit;
+      for (const bad of [undefined, '', ' , ']) {
+        expect(() => loadEnv({ ...rest, NODE_ENV: nodeEnv, CORS_ORIGINS: bad })).toThrow(
+          /CORS_ORIGINS/,
+        );
+      }
+    },
+  );
 
   it('PORT가 숫자 범위 밖이면 실패한다', () => {
     expect(() => loadEnv({ ...valid, PORT: '70000' })).toThrow(EnvValidationError);

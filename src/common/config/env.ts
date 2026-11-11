@@ -1,11 +1,9 @@
 import { z } from 'zod';
 
-const DEV_DEFAULT_CORS_ORIGIN = 'http://localhost:3000';
-
 const rawSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']),
   PORT: z.coerce.number().int().min(1).max(65535).default(3001),
-  CORS_ORIGINS: z.string().optional(),
+  CORS_ORIGINS: z.string().min(1),
   DATABASE_URL: z
     .string()
     .min(1)
@@ -35,12 +33,11 @@ export function loadEnv(raw: Record<string, string | undefined>): Env {
     );
   }
   const { CORS_ORIGINS, ...rest } = parsed.data;
-  const listed = (CORS_ORIGINS ?? '')
-    .split(',')
+  const listed = CORS_ORIGINS.split(',')
     .map((s) => s.trim())
     .filter(Boolean);
-  if (listed.length === 0 && rest.NODE_ENV !== 'development') {
-    throw new EnvValidationError(['CORS_ORIGINS: development 밖에서는 필수다']);
+  if (listed.length === 0) {
+    throw new EnvValidationError(['CORS_ORIGINS: 허용 출처가 하나 이상 있어야 한다']);
   }
-  return { ...rest, CORS_ORIGINS: listed.length > 0 ? listed : [DEV_DEFAULT_CORS_ORIGIN] };
+  return { ...rest, CORS_ORIGINS: listed };
 }

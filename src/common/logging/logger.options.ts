@@ -2,7 +2,10 @@ import type { Params } from 'nestjs-pino';
 import type { DestinationStream } from 'pino';
 import type { Env } from '../config/env.js';
 
-/** Authorization 헤더(신원 키 Bearer)와 신원 키 필드는 어느 위치에 나와도 가린다. */
+/**
+ * 알려진 위치만 가린다: 요청 헤더의 Authorization·cookie와, 최상위 또는 한 단계 중첩된
+ * authorization·identityKey 필드. 신원 키를 더 깊은 객체에 담아 로그에 남기지 않는다.
+ */
 export const REDACT_PATHS = [
   'req.headers.authorization',
   'req.headers.cookie',
