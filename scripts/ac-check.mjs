@@ -68,7 +68,7 @@ function tagsFromTitle(arg) {
 }
 
 /**
- * `it.each(<표>)`의 시험 사례 수를 정적으로 판정한다: 'none'(each 아님) | 'empty' | 'some' | 'unknown'.
+ * `it.each(<표>)`·`it.for(<표>)`의 시험 사례 수를 정적으로 판정한다: 'none'(each 아님) | 'empty' | 'some' | 'unknown'.
  * 표가 배열 리터럴이고 전개(...)가 없을 때만 알 수 있다. 변수·전개·함수 호출은 'unknown'이며,
  * 정적 모드에서는 덮는다고 보지 않는다(통과 여부는 --results 모드가 증명한다).
  */
@@ -76,7 +76,10 @@ function eachCases(expr) {
   let cur = expr;
   for (;;) {
     if (ts.isCallExpression(cur)) {
-      if (ts.isPropertyAccessExpression(cur.expression) && cur.expression.name.text === 'each') {
+      if (
+        ts.isPropertyAccessExpression(cur.expression) &&
+        (cur.expression.name.text === 'each' || cur.expression.name.text === 'for')
+      ) {
         const table = cur.arguments[0];
         if (!table || !ts.isArrayLiteralExpression(table)) return 'unknown';
         if (table.elements.some((e) => ts.isSpreadElement(e))) return 'unknown';

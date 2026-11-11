@@ -46,8 +46,8 @@ export class DatabaseService {
    * `fn`이 던지면 롤백되고 잠금이 풀린다.
    */
   async withRoomLock<T>(roomId: string, fn: (tx: DbTx) => Promise<T>): Promise<T> {
-    return this.transaction(undefined, async (tx) => {
-      await this.applyTimeouts(tx);
+    return this.transaction(undefined, async (tx, remaining) => {
+      await this.applyTimeouts(tx, remaining);
       const rows = await tx.$queryRaw<{ id: string }[]>`
         SELECT "id" FROM "Room" WHERE "id" = ${roomId} FOR UPDATE`;
       if (rows.length === 0) throw new RoomNotFoundError(roomId);
@@ -57,10 +57,10 @@ export class DatabaseService {
 
   /** 방 잠금 없이 한 시점의 일관된 읽기(REPEATABLE READ, READ ONLY). 쓰기를 막지 않는다. */
   async readSnapshot<T>(fn: (tx: DbTx) => Promise<T>): Promise<T> {
-    return this.transaction('RepeatableRead', async (tx) => {
+    return this.transaction('RepeatableRead', async (tx, remaining) => {
       // 첫 문장이어야 한다.
       await tx.$executeRaw`SET TRANSACTION READ ONLY`;
-      await this.applyTimeouts(tx);
+      await this.applyTimeouts(tx, remaining);
       return fn(tx);
     });
   }
@@ -75,32 +75,44 @@ export class DatabaseService {
 
   /**
    * 한도는 호출 시점부터의 **절대 마감**이다. 풀 연결을 기다린 시간(`maxWait`)도 한도에 포함된다.
-   * - 호출자: 마감에 `RequestTimeoutError`로 거부된다(콜백이 끝나기를 기다리지 않는다).
-   * - 트랜잭션: 콜백 안에서 남은 시간으로 마감을 걸어 같은 시각에 콜백을 거부시키므로 Prisma가 그 즉시
-   *   롤백하고 방 잠금이 풀린다. 마감 뒤에 도착한 문장은 닫힌 트랜잭션에서 실패해 커밋되지 않는다.
-   *   트랜잭션이 마감 뒤에야 시작되면 `fn`을 실행하지 않고 던진다.
+   * - 호출자: 마감 전까지 결과를 받는다. 마감이 지나면 `RequestTimeoutError`로 거부된다. 단 콜백이 마감 안에
+   *   끝나 커밋이 진행 중이면 거부하지 않고 커밋 결과를 기다린다(시간 초과로 보고했는데 커밋되는 불일치를 막는다).
+   * - 트랜잭션: 콜백 안에서 남은 시간으로 마감을 걸어 같은 시각에 콜백을 거부시키면 Prisma가 롤백을 요청한다.
+   *   마감 뒤에 도착한 문장은 닫힌 트랜잭션에서 실패한다. 트랜잭션이 마감 뒤에야 시작되거나 콜백이 마감 뒤에
+   *   끝나면 커밋하지 않고 던진다. 롤백 요청은 진행 중인 문장 뒤에 줄을 서므로 잠금 해제는 그 문장이 끝날
+   *   때까지(최대 남은 시간으로 줄인 `statement_timeout`) 늦어질 수 있다.
    * - 콜백 `fn` 자체는 취소되지 않고 계속 실행될 수 있다(부수 효과는 트랜잭션 안에서만 만든다).
    */
   private async transaction<T>(
     isolationLevel: 'RepeatableRead' | undefined,
-    fn: (tx: DbTx) => Promise<T>,
+    fn: (tx: DbTx, remainingMs: number) => Promise<T>,
   ): Promise<T> {
     const limit = this.timeouts.REQUEST_TIMEOUT_MS;
     const deadlineAt = Date.now() + limit;
+    let state: 'running' | 'committing' | 'expired' = 'running';
+    const expired = (): boolean => state === 'expired'; // 클로저에서 바뀌므로 함수로 읽는다
     let callerTimer: NodeJS.Timeout | undefined;
     const callerDeadline = new Promise<never>((_, reject) => {
-      callerTimer = setTimeout(() => reject(new RequestTimeoutError(limit)), limit);
+      callerTimer = setTimeout(() => {
+        if (state === 'committing') return; // 커밋 결과를 기다린다
+        state = 'expired';
+        reject(new RequestTimeoutError(limit));
+      }, limit);
     });
     const run = this.prisma.client.$transaction(
       async (tx) => {
         const remaining = deadlineAt - Date.now();
-        if (remaining <= 0) throw new RequestTimeoutError(limit);
+        if (expired() || remaining <= 0) throw new RequestTimeoutError(limit);
         let txTimer: NodeJS.Timeout | undefined;
         const txDeadline = new Promise<never>((_, reject) => {
           txTimer = setTimeout(() => reject(new RequestTimeoutError(limit)), remaining);
         });
         try {
-          return await Promise.race([fn(tx), txDeadline]);
+          const value = await Promise.race([fn(tx, remaining), txDeadline]);
+          // 마감을 넘겨 끝난 콜백은 커밋하지 않는다. 마감 안에 끝났으면 커밋 결과까지 호출자가 기다린다.
+          if (expired() || Date.now() >= deadlineAt) throw new RequestTimeoutError(limit);
+          state = 'committing';
+          return value;
         } finally {
           clearTimeout(txTimer);
         }
@@ -121,9 +133,11 @@ export class DatabaseService {
     }
   }
 
-  private async applyTimeouts(tx: DbTx): Promise<void> {
+  /** 잠금·문장 제한은 설정값과 남은 시간 중 작은 값이다(마감 뒤로 문장이 길게 이어지지 않게 한다). */
+  private async applyTimeouts(tx: DbTx, remainingMs: number): Promise<void> {
     const { DB_LOCK_TIMEOUT_MS: lock, DB_STATEMENT_TIMEOUT_MS: stmt } = this.timeouts;
-    await tx.$queryRaw`SELECT set_config('lock_timeout', ${`${lock}ms`}, true),
-                              set_config('statement_timeout', ${`${stmt}ms`}, true)`;
+    const cap = Math.max(1, Math.floor(remainingMs));
+    await tx.$queryRaw`SELECT set_config('lock_timeout', ${`${Math.min(lock, cap)}ms`}, true),
+                              set_config('statement_timeout', ${`${Math.min(stmt, cap)}ms`}, true)`;
   }
 }

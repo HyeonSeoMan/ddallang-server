@@ -157,6 +157,21 @@ describe('AC 검사 스크립트: 실행될 시험 사례 (리뷰 F01·F02)', ()
     ]);
   });
 
+  it('test.for·it.for도 each와 같이 표의 사례 수로 판정한다(리뷰 M01)', () => {
+    expect(covered(`test.for([])('[AC-ROOM-001-1] x', () => {});`)).toEqual([
+      ['AC-ROOM-001-1', false],
+    ]);
+    expect(covered(`it.for(table)('[AC-ROOM-001-1] x', () => {});`)).toEqual([
+      ['AC-ROOM-001-1', false],
+    ]);
+    expect(covered(`it.for([1, 2])('[AC-ROOM-001-1] x', () => {});`)).toEqual([
+      ['AC-ROOM-001-1', true],
+    ]);
+    expect(
+      covered(`describe('[AC-ROOM-001-1] x', () => { test.for([])('a', () => {}); });`),
+    ).toEqual([['AC-ROOM-001-1', false]]);
+  });
+
   it('치환을 가로지르는 템플릿 조각을 이어 붙여 태그를 만들지 않는다', () => {
     expect(tagsOf('it(`[AC-ROOM-${1}001-1] x`, () => {});')).toEqual([]);
     expect(tagsOf('it(`[AC-ROOM-001-1] x ${1}`, () => {});')).toEqual(['AC-ROOM-001-1']);

@@ -304,6 +304,84 @@ describe('요청 마감은 풀 연결 대기까지 포함한 절대 시각이다
   });
 });
 
+describe('마감 근처의 결과 일관성 (리뷰 M02)', () => {
+  it('마감 앞뒤로 끝나는 호출은 결과와 저장 상태가 항상 일치한다(시간 초과인데 커밋되지 않는다)', async () => {
+    const edge = makeDb({ REQUEST_TIMEOUT_MS: 250 });
+    const durations = [150, 200, 225, 235, 240, 245, 250, 255, 260, 280];
+    await prisma.client.$executeRawUnsafe(
+      `INSERT INTO "Room" ("id") VALUES ${durations.map((_, i) => `('e${i}')`).join(',')}`,
+    );
+    const outcomes = await Promise.all(
+      durations.map((ms, i) =>
+        edge
+          .withRoomLock(`e${i}`, async (tx) => {
+            await tx.$executeRaw`UPDATE "Room" SET "revision" = 7 WHERE "id" = ${`e${i}`}`;
+            await sleep(ms);
+          })
+          .then(
+            () => 'ok' as const,
+            (e: unknown) =>
+              e instanceof RequestTimeoutError
+                ? ('timeout' as const)
+                : (`other:${String(e)}` as const),
+          ),
+      ),
+    );
+    await sleep(600); // 늦게 도착한 커밋·롤백이 모두 끝날 시간
+    for (const [i, outcome] of outcomes.entries()) {
+      const stored = await revision(`e${i}`);
+      expect(outcome === 'ok' ? 7 : 0, `${durations[i]}ms → ${outcome}`).toBe(stored);
+      expect(['ok', 'timeout']).toContain(outcome);
+    }
+    expect(outcomes).toContain('ok');
+    expect(outcomes).toContain('timeout');
+  });
+
+  it('콜백이 마감 안에 끝났으면 커밋이 마감을 넘겨도 호출자는 시간 초과가 아니라 커밋 결과를 받는다', async () => {
+    // 커밋 시점에 0.3초 걸리는 지연 제약 트리거로 느린 커밋을 만든다('slow' 방만).
+    await ts.fixtures(`
+      CREATE OR REPLACE FUNCTION slow_commit() RETURNS trigger AS $$
+      BEGIN PERFORM pg_sleep(0.3); RETURN NULL; END $$ LANGUAGE plpgsql;
+      DROP TRIGGER IF EXISTS slow_commit_trg ON "Room";
+      CREATE CONSTRAINT TRIGGER slow_commit_trg AFTER UPDATE ON "Room"
+        DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (NEW."id" LIKE 'slow%')
+        EXECUTE FUNCTION slow_commit();
+      INSERT INTO "Room" ("id") VALUES ('slow1')`);
+    const edge = makeDb({ REQUEST_TIMEOUT_MS: 400 });
+    const t0 = Date.now();
+    const out = await edge
+      .withRoomLock('slow1', async (tx) => {
+        await tx.$executeRaw`UPDATE "Room" SET "revision" = 7 WHERE "id" = 'slow1'`;
+        await sleep(150); // 마감(400ms) 안에 끝나지만 커밋(~300ms)이 마감을 넘긴다
+      })
+      .then(
+        () => 'ok' as const,
+        (e: unknown) =>
+          e instanceof RequestTimeoutError ? ('timeout' as const) : ('other' as const),
+      );
+    expect(Date.now() - t0).toBeGreaterThan(400); // 커밋이 마감을 넘겼다
+    expect(out).toBe('ok'); // 시간 초과로 보고하면서 커밋되는 불일치가 없다
+    expect(await revision('slow1')).toBe(7);
+  });
+
+  it('남은 시간이 설정보다 짧으면 문장 제한을 남은 시간으로 줄인다(마감 뒤로 늘어지지 않는다)', async () => {
+    const short = makeDb({ REQUEST_TIMEOUT_MS: 400, DB_STATEMENT_TIMEOUT_MS: 10_000 });
+    const t0 = Date.now();
+    const err = await short
+      .withRoomLock('a', async (tx) => tx.$queryRaw`SELECT pg_sleep(3)::text`)
+      .then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+    expect(err).toBeInstanceOf(RequestTimeoutError);
+    expect(Date.now() - t0).toBeLessThan(900);
+    // 진행 중이던 문장이 남은 시간으로 끊겨 잠금이 곧 풀린다
+    const t1 = Date.now();
+    expect(await db.withRoomLock('a', async () => 'free')).toBe('free');
+    expect(Date.now() - t1).toBeLessThan(1_000);
+  });
+});
+
 describe('readSnapshot (PD-11)', () => {
   it('REPEATABLE READ, READ ONLY이며 한 시점을 본다', async () => {
     const info = await db.readSnapshot(async (tx) => {
