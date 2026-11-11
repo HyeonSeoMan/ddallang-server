@@ -13,6 +13,6 @@ import { PrismaService } from './prisma.service.js';
       inject: [PrismaService, ENV],
     },
   ],
-  exports: [DatabaseService],
+  exports: [DatabaseService, PrismaService],
 })
 export class DbModule {}

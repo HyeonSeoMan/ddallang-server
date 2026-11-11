@@ -5,6 +5,7 @@ import request from 'supertest';
 import { configureApp } from '../../src/app.js';
 import { AppModule } from '../../src/app.module.js';
 import type { Env } from '../../src/common/config/env.js';
+import type { DestinationStream } from 'pino';
 import { quietLog, testEnv } from './env.js';
 
 export interface FixtureApp {
@@ -21,10 +22,11 @@ export async function bootFixtureApp(
   controllers: Type<unknown>[] = [],
   nodeEnv: Env['NODE_ENV'] = 'test',
   overrides: Partial<Env> = {},
+  logStream: DestinationStream = quietLog,
 ): Promise<FixtureApp> {
   const env = { ...testEnv(nodeEnv), ...overrides };
   const moduleRef = await Test.createTestingModule({
-    imports: [AppModule.register(env, quietLog)],
+    imports: [AppModule.register(env, logStream)],
     controllers,
   }).compile();
   const app = moduleRef.createNestApplication<NestExpressApplication>({ bodyParser: false });
