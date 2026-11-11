@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist-test",
+    "incremental": true,
+    "tsBuildInfoFile": "dist-test/.tsbuildinfo"
+  },
+  "include": ["src", "test/fixtures"],
+  "exclude": ["**/*.spec.ts"]
+}
