@@ -51,8 +51,11 @@ function tagsFromTitle(arg) {
   if (ts.isStringLiteralLike(arg))
     return [...arg.text.matchAll(/\[(AC-[A-Z]+-\d{3}-\d+)\]/g)].map((m) => m[1]);
   if (ts.isTemplateExpression(arg)) {
-    const text = [arg.head.text, ...arg.templateSpans.map((s) => s.literal.text)].join('');
-    return [...text.matchAll(/\[(AC-[A-Z]+-\d{3}-\d+)\]/g)].map((m) => m[1]);
+    // 치환(${…})을 가로지르는 조각을 이어 붙이면 실행 때 없는 제목이 생기므로 리터럴 조각마다 따로 본다.
+    const segments = [arg.head.text, ...arg.templateSpans.map((sp) => sp.literal.text)];
+    return segments.flatMap((seg) =>
+      [...seg.matchAll(/\[(AC-[A-Z]+-\d{3}-\d+)\]/g)].map((m) => m[1]),
+    );
   }
   // 도우미: ac('AC-…' | ['AC-…'], 'S1 §3.2', '제목')
   if (ts.isCallExpression(arg) && ts.isIdentifier(arg.expression) && arg.expression.text === 'ac') {
@@ -64,28 +67,61 @@ function tagsFromTitle(arg) {
   return [];
 }
 
-/** 시험 파일 하나에서 제목 태그를 모은다. 주석·시험 본문 안의 문자열은 세지 않는다. */
+function isEmptyEach(callee) {
+  // it.each([])('…') : 호출 대상이 `it.each(<빈 배열 리터럴>)`이면 시험 사례가 0개다.
+  return (
+    ts.isCallExpression(callee) &&
+    ts.isPropertyAccessExpression(callee.expression) &&
+    callee.expression.name.text === 'each' &&
+    callee.arguments[0] !== undefined &&
+    ts.isArrayLiteralExpression(callee.arguments[0]) &&
+    callee.arguments[0].elements.length === 0
+  );
+}
+
+/**
+ * 시험 파일 하나에서 제목 태그를 모은다. 주석·시험 본문 안의 문자열은 세지 않는다.
+ * 태그가 "덮는다"고 보려면 실제로 실행될 시험 사례가 있어야 한다:
+ * - skip/todo/skipIf가 붙었거나, 그런 조상(describe.skip 등) 안에 있거나, 빈 it.each이면 덮지 않는다.
+ * - describe의 태그는 그 안에 실행될 시험 사례가 하나 이상 있을 때만 덮는다.
+ */
 export function scanTestSource(path, text) {
-  const found = [];
+  const entries = [];
   const source = ts.createSourceFile(path, text, ts.ScriptTarget.ES2022, true);
-  const visit = (node) => {
+  const visit = (node, ancestors) => {
+    let nextAncestors = ancestors;
     if (ts.isCallExpression(node)) {
       const chain = chainOf(node.expression);
       if (chain && TEST_BASES.has(chain.base)) {
         const tags = tagsFromTitle(node.arguments[0]);
-        if (tags.length > 0 || chain.mods.includes('only')) {
-          const { line } = source.getLineAndCharacterOfPosition(node.getStart());
-          const skipped = chain.mods.some((m) => SKIP_MODS.has(m));
-          const only = chain.mods.includes('only');
-          for (const id of tags.length > 0 ? tags : [undefined]) {
-            found.push({ id, file: path, line: line + 1, skipped, only });
-          }
-        }
+        const only = chain.mods.includes('only');
+        const dead = chain.mods.some((m) => SKIP_MODS.has(m)) || isEmptyEach(node.expression);
+        const isSuite = chain.base === 'describe';
+        const entry = {
+          tags,
+          only,
+          isSuite,
+          dead,
+          cases: 0,
+          line: source.getLineAndCharacterOfPosition(node.getStart()).line + 1,
+          effectivelyDead: dead || ancestors.some((a) => a.effectivelyDead),
+        };
+        if (!isSuite && !entry.effectivelyDead) for (const a of ancestors) a.cases++;
+        if (tags.length > 0 || only) entries.push(entry);
+        nextAncestors = [...ancestors, entry];
       }
     }
-    ts.forEachChild(node, visit);
+    ts.forEachChild(node, (child) => visit(child, nextAncestors));
   };
-  visit(source);
+  visit(source, []);
+
+  const found = [];
+  for (const e of entries) {
+    const covers = !e.effectivelyDead && (!e.isSuite || e.cases > 0);
+    for (const id of e.tags.length > 0 ? e.tags : [undefined]) {
+      found.push({ id, file: path, line: e.line, skipped: !covers, only: e.only });
+    }
+  }
   return found;
 }
 
@@ -116,6 +152,22 @@ export function tagsFromResults(json) {
   return out;
 }
 
+/** vitest JSON 보고서 전체의 건강 상태: 태그 없는 시험·스위트 실패도 잡는다. */
+export function resultsHealth(json) {
+  let failedTests = 0;
+  let failedSuites = 0;
+  for (const f of json.testResults ?? []) {
+    const cases = f.assertionResults ?? [];
+    failedTests += cases.filter((t) => t.status === 'failed').length;
+    if (f.status === 'failed' && !cases.some((t) => t.status === 'failed')) failedSuites++;
+  }
+  return {
+    failedTests,
+    failedSuites,
+    ok: json.success !== false && failedTests === 0 && failedSuites === 0,
+  };
+}
+
 function matchesTask(cell, task) {
   const esc = task.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return new RegExp(`(^|[^A-Za-z0-9-])${esc}($|[^A-Za-z0-9-])`).test(cell);
@@ -125,7 +177,7 @@ function matchesTask(cell, task) {
  * 판정. static: 제목에 태그가 있고 skip/todo가 아닌 시험이 있으면 덮인 것으로 본다.
  * results: 태그가 달린 시험이 실제로 통과했을 때만 덮인 것이고, 실패한 태그 시험이 있으면 실패다.
  */
-export function evaluate({ rows, tags, results, task, spec }) {
+export function evaluate({ rows, tags, results, task, spec, health, allowEmpty }) {
   const byId = new Map(rows.map((r) => [r.id, r]));
   const problems = [];
   const covered = new Set();
@@ -159,6 +211,16 @@ export function evaluate({ rows, tags, results, task, spec }) {
   let required = rows.filter((r) => REQUIRED_KINDS.has(r.kind));
   if (task) required = required.filter((r) => matchesTask(r.task, task));
   if (spec) required = required.filter((r) => r.spec === spec);
+  if ((task || spec) && required.length === 0 && !allowEmpty) {
+    problems.push({ kind: 'empty-filter' });
+  }
+  if (health && !health.ok) {
+    problems.push({
+      kind: 'test-run-failed',
+      failedTests: health.failedTests,
+      failedSuites: health.failedSuites,
+    });
+  }
   const missing = required
     .filter((r) => !covered.has(r.id))
     .map((r) => ({ ...r, skipped: skippedOnly.has(r.id) }));
@@ -206,6 +268,7 @@ function parseArgs(argv) {
     else if (a === '--task') opts.task = next();
     else if (a === '--spec') opts.spec = next();
     else if (a === '--results') opts.results = next();
+    else if (a === '--allow-empty') opts.allowEmpty = true;
     else throw new Error(`알 수 없는 옵션: ${a}`);
   }
   return opts;
@@ -220,10 +283,18 @@ export function run(argv, io = { out: (s) => console.log(s) }) {
   const tags = files.flatMap((f) =>
     scanTestSource(relative(process.cwd(), f), readFileSync(f, 'utf8')),
   );
-  const results = opts.results
-    ? tagsFromResults(JSON.parse(readFileSync(opts.results, 'utf8')))
-    : undefined;
-  const r = evaluate({ rows, tags, results, task: opts.task, spec: opts.spec });
+  const resultsJson = opts.results ? JSON.parse(readFileSync(opts.results, 'utf8')) : undefined;
+  const results = resultsJson ? tagsFromResults(resultsJson) : undefined;
+  const health = resultsJson ? resultsHealth(resultsJson) : undefined;
+  const r = evaluate({
+    rows,
+    tags,
+    results,
+    task: opts.task,
+    spec: opts.spec,
+    health,
+    allowEmpty: opts.allowEmpty,
+  });
 
   const kinds = rows.reduce((m, x) => ((m[x.kind] = (m[x.kind] ?? 0) + 1), m), {});
   io.out(`매핑표: ${source}`);
@@ -245,6 +316,14 @@ export function run(argv, io = { out: (s) => console.log(s) }) {
     else if (p.kind === 'fe-only-tag') io.out(`  오류 FE 전용 AC에 백엔드 시험 태그: ${p.id}`);
     else if (p.kind === 'only') io.out(`  오류 .only 시험: ${p.file}:${p.line}`);
     else if (p.kind === 'failed-test') io.out(`  오류 실패한 태그 시험: ${p.id}`);
+    else if (p.kind === 'empty-filter')
+      io.out(
+        '  오류 --task/--spec에 해당하는 필수 AC 행이 없다(오타이거나 AC가 없는 기반 Task면 --allow-empty)',
+      );
+    else if (p.kind === 'test-run-failed')
+      io.out(
+        `  오류 시험 실행 실패: 실패 시험 ${p.failedTests}개, 실패 스위트 ${p.failedSuites}개(태그 없는 시험 포함)`,
+      );
   }
   io.out(r.ok ? '결과: 통과' : '결과: 실패');
   return r.ok ? 0 : 1;

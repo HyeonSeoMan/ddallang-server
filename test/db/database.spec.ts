@@ -1,5 +1,9 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { DatabaseService, RoomNotFoundError } from '../../src/common/db/database.service.js';
+import {
+  DatabaseService,
+  RequestTimeoutError,
+  RoomNotFoundError,
+} from '../../src/common/db/database.service.js';
 import { PrismaService } from '../../src/common/db/prisma.service.js';
 import { createIsolatedDb, TEST_ROOM_DDL, type IsolatedDb } from '../helpers/isolated-db.js';
 import { deferred, sleep, sqlState } from '../helpers/util.js';
@@ -173,6 +177,58 @@ describe('withRoomLock (PD-3)', () => {
     const rows = await prisma.client.$queryRaw<{ lock: string; stmt: string }[]>`
       SELECT current_setting('lock_timeout') AS "lock", current_setting('statement_timeout') AS "stmt"`;
     expect(rows[0]).toEqual({ lock: '0', stmt: '0' });
+  });
+});
+
+describe('요청 제한 시간 (PD-3, RK-5)', () => {
+  it('콜백이 제한을 넘기면 호출자는 콜백이 끝나기를 기다리지 않고 거부된다', async () => {
+    const short = makeDb({ REQUEST_TIMEOUT_MS: 1_000 });
+    const started = Date.now();
+    const err = await short
+      .withRoomLock('a', async (tx) => {
+        await tx.$executeRaw`UPDATE "Room" SET "revision" = 99 WHERE "id" = 'a'`;
+        await sleep(3_000);
+      })
+      .then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+    const elapsed = Date.now() - started;
+    expect(err).toBeInstanceOf(RequestTimeoutError);
+    expect((err as RequestTimeoutError).limitMs).toBe(1_000);
+    expect(elapsed).toBeGreaterThanOrEqual(900);
+    expect(elapsed).toBeLessThan(2_000); // 콜백이 끝나는 3초가 아니라 제한 시각에 거부된다
+  });
+
+  it('제한 시각에 롤백되어 쓴 값이 남지 않고 잠금이 풀린다', async () => {
+    const short = makeDb({ REQUEST_TIMEOUT_MS: 800 });
+    const slow = short
+      .withRoomLock('a', async (tx) => {
+        await tx.$executeRaw`UPDATE "Room" SET "revision" = 99 WHERE "id" = 'a'`;
+        await sleep(2_500);
+      })
+      .catch((e: unknown) => e);
+    await sleep(100);
+    const t0 = Date.now();
+    const got = await db.withRoomLock('a', async (tx) => {
+      const rows = await tx.$queryRaw<
+        { revision: number }[]
+      >`SELECT "revision" FROM "Room" WHERE "id" = 'a'`;
+      return rows[0]!.revision;
+    });
+    expect(got).toBe(0); // 99는 롤백됨
+    expect(Date.now() - t0).toBeLessThan(1_500); // 콜백이 계속 도는 동안에도 잠금이 먼저 풀렸다
+    expect(await slow).toBeInstanceOf(RequestTimeoutError);
+    await sleep(2_000); // 늦게 끝난 콜백이 처리되지 않은 거부를 남기지 않는다
+    expect(await revision('a')).toBe(0);
+  });
+
+  it('제한 안에 끝나면 영향이 없고 읽기 스냅샷에도 같은 제한이 적용된다', async () => {
+    const short = makeDb({ REQUEST_TIMEOUT_MS: 800 });
+    expect(await short.withRoomLock('a', async () => 'fast')).toBe('fast');
+    await expect(short.readSnapshot(async () => sleep(2_000))).rejects.toBeInstanceOf(
+      RequestTimeoutError,
+    );
   });
 });
 

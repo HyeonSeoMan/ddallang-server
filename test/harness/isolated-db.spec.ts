@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -125,11 +126,11 @@ describe('시험 DB 격리 (BE-F8)', () => {
   it('오래된 t_ 스키마만 정리하고 최근 것·다른 이름은 건드리지 않는다', async () => {
     const admin = new pg.Client({ connectionString: baseDatabaseUrl() });
     await admin.connect();
-    const old = 't_0123456789ab';
-    const odd = 't_notatestschema';
+    // 이 시험이 만든 스키마만 다룬다: 실행마다 고유한 이름이라 선행 삭제도, 다른 실행과의 충돌도 없다.
+    const hex = randomBytes(6).toString('hex');
+    const old = `t_${hex}`;
+    const odd = `t_notatest_${hex}`;
     try {
-      await admin.query(`DROP SCHEMA IF EXISTS "${old}" CASCADE`);
-      await admin.query(`DROP SCHEMA IF EXISTS "${odd}" CASCADE`);
       await admin.query(`CREATE SCHEMA "${old}"`);
       await admin.query(
         `COMMENT ON SCHEMA "${old}" IS 'f8-test-schema created=${Date.now() - 2 * 60 * 60 * 1000}'`,

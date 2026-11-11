@@ -19,6 +19,18 @@ export class RoomNotFoundError extends Error {
 }
 
 /**
+ * 트랜잭션이 `REQUEST_TIMEOUT_MS` 안에 끝나지 않았다. 호출자는 콜백이 끝나기를 기다리지 않고
+ * 이 시점에 거부된다. 트랜잭션은 Prisma가 같은 시각에 롤백하고 방 잠금이 풀린다. 콜백 자체는
+ * 취소되지 않고 계속 실행될 수 있으나 이후 쿼리는 실패한다(부수 효과는 트랜잭션 안에서만 만든다).
+ */
+export class RequestTimeoutError extends Error {
+  constructor(readonly limitMs: number) {
+    super(`transaction exceeded ${limitMs}ms`);
+    this.name = 'RequestTimeoutError';
+  }
+}
+
+/**
  * DB 접근의 공통 진입점. 방 단위 직렬화(PD-3), 읽기 전용 스냅샷(PD-11), DB 시각(PD-4)을 제공한다.
  * 제한 시간은 `SET LOCAL`로 트랜잭션 안에서만 적용한다(장기 연결에 영향을 주지 않는다).
  */
@@ -61,16 +73,28 @@ export class DatabaseService {
     return rows[0]!.now;
   }
 
-  private transaction<T>(
+  private async transaction<T>(
     isolationLevel: 'RepeatableRead' | undefined,
     fn: (tx: DbTx) => Promise<T>,
   ): Promise<T> {
-    return this.prisma.client.$transaction(fn, {
+    const limit = this.timeouts.REQUEST_TIMEOUT_MS;
+    let timer: NodeJS.Timeout | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new RequestTimeoutError(limit)), limit);
+    });
+    const run = this.prisma.client.$transaction(fn, {
       // 풀 연결을 기다리는 시간은 잠금 대기와 같은 한도로 묶는다.
       maxWait: this.timeouts.DB_LOCK_TIMEOUT_MS,
-      timeout: this.timeouts.REQUEST_TIMEOUT_MS,
+      // Prisma도 같은 한도로 롤백한다(잠금 해제). 호출자는 위 deadline으로 먼저 거부된다.
+      timeout: limit,
       ...(isolationLevel ? { isolationLevel } : {}),
     });
+    run.catch(() => undefined); // deadline에 진 뒤 늦게 거부되는 결과는 처리된 것으로 본다.
+    try {
+      return await Promise.race([run, deadline]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   private async applyTimeouts(tx: DbTx): Promise<void> {

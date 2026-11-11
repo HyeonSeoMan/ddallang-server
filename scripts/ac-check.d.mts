@@ -28,11 +28,18 @@ export function parseMatrix(markdown: string): { rows: MatrixRow[]; version: str
 export function scanTestSource(path: string, text: string): ScannedTag[];
 export function collectTestFiles(root: string): string[];
 export function tagsFromResults(json: unknown): ResultTag[];
+export function resultsHealth(json: unknown): {
+  failedTests: number;
+  failedSuites: number;
+  ok: boolean;
+};
 export function evaluate(args: {
   rows: MatrixRow[];
   tags: ScannedTag[];
   results?: ResultTag[];
   task?: string;
   spec?: string;
+  health?: { failedTests: number; failedSuites: number; ok: boolean };
+  allowEmpty?: boolean;
 }): EvalResult;
 export function run(argv: string[], io?: { out: (s: string) => void }): number;
