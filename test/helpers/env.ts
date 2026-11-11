@@ -6,6 +6,10 @@ export function testEnv(nodeEnv: Env['NODE_ENV'] = 'test'): Env {
     PORT: 3001,
     CORS_ORIGINS: ['http://localhost:3000'],
     DATABASE_URL: 'postgresql://user:pw@localhost:5432/db',
+    DB_LOCK_TIMEOUT_MS: 5_000,
+    DB_STATEMENT_TIMEOUT_MS: 10_000,
+    REQUEST_TIMEOUT_MS: 30_000,
+    DB_POOL_MAX: 10,
   };
 }
 

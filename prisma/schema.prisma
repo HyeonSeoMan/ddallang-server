@@ -1,0 +1,10 @@
+// BE-F2: 모델 없는 골격. 모델과 마이그레이션은 소유 Task가 추가한다(plan §3 "스키마 소유").
+// CHECK 제약·부분 인덱스는 Prisma가 표현하지 못하므로 SQL 마이그레이션(prisma/migrations/*/migration.sql)에 직접 쓴다(PD-2).
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}

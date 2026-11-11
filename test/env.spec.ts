@@ -59,4 +59,51 @@ describe('loadEnv (PD-18)', () => {
       expect((e as Error).message).not.toContain('secret-pw');
     }
   });
+
+  it('DB 시간 제한 기본값은 5초·10초·30초, 풀은 10이다', () => {
+    const env = loadEnv(valid);
+    expect(env).toMatchObject({
+      DB_LOCK_TIMEOUT_MS: 5000,
+      DB_STATEMENT_TIMEOUT_MS: 10000,
+      REQUEST_TIMEOUT_MS: 30000,
+      DB_POOL_MAX: 10,
+    });
+  });
+
+  it('값을 환경 변수로 바꿀 수 있다', () => {
+    const env = loadEnv({
+      ...valid,
+      DB_LOCK_TIMEOUT_MS: '1000',
+      DB_STATEMENT_TIMEOUT_MS: '2000',
+      REQUEST_TIMEOUT_MS: '3000',
+      DB_POOL_MAX: '4',
+    });
+    expect(env).toMatchObject({ DB_LOCK_TIMEOUT_MS: 1000, DB_POOL_MAX: 4 });
+  });
+
+  it.each([
+    ['lock == statement', { DB_LOCK_TIMEOUT_MS: '10000' }],
+    ['lock > statement', { DB_LOCK_TIMEOUT_MS: '20000' }],
+    ['statement == request', { DB_STATEMENT_TIMEOUT_MS: '30000' }],
+    ['statement > request', { DB_STATEMENT_TIMEOUT_MS: '40000' }],
+    ['request == 1시간', { REQUEST_TIMEOUT_MS: '3600000' }],
+    ['request > 1시간', { REQUEST_TIMEOUT_MS: '7200000' }],
+  ])('시간 제한 순서를 어기면 실패한다: %s', (_n, override) => {
+    expect(() => loadEnv({ ...valid, ...override })).toThrow(/DB_LOCK_TIMEOUT_MS <|DB_/);
+  });
+
+  it('요청 제한이 1시간 바로 아래(3599999)면 통과한다', () => {
+    expect(loadEnv({ ...valid, REQUEST_TIMEOUT_MS: '3599999' }).REQUEST_TIMEOUT_MS).toBe(3599999);
+  });
+
+  it.each(['0', '-1', '1.5', 'abc'])('DB 설정 값 %s는 거부한다', (bad) => {
+    for (const key of [
+      'DB_LOCK_TIMEOUT_MS',
+      'DB_STATEMENT_TIMEOUT_MS',
+      'REQUEST_TIMEOUT_MS',
+      'DB_POOL_MAX',
+    ]) {
+      expect(() => loadEnv({ ...valid, [key]: bad })).toThrow(EnvValidationError);
+    }
+  });
 });
