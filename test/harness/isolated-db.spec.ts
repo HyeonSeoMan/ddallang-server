@@ -64,6 +64,18 @@ describe('시험 DB 격리 (BE-F8)', () => {
     }
   });
 
+  it('PrismaService는 허용되지 않는 schema 이름을 거부한다', () => {
+    for (const bad of ['a-b', '1abc', 'a b', 'a"b', 'a;drop']) {
+      expect(
+        () =>
+          new PrismaService({
+            DATABASE_URL: `postgresql://u:p@h/d?schema=${encodeURIComponent(bad)}`,
+            DB_POOL_MAX: 1,
+          }),
+      ).toThrow(/invalid schema/);
+    }
+  });
+
   it('drop하면 스키마가 사라진다', async () => {
     const db = await createIsolatedDb();
     const admin = new pg.Client({ connectionString: baseDatabaseUrl() });
