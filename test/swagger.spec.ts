@@ -25,7 +25,7 @@ describe('Swagger 부트스트랩 (PD-19)', () => {
     expect(ui.headers['content-type']).toContain('text/html');
     const json = await http.get('/api-docs-json');
     expect(json.status).toBe(200);
-    expect(Object.keys(json.body.paths)).toEqual(['/health']);
+    expect(Object.keys(json.body.paths)).toContain('/health');
   });
 
   it('Bearer 인증과 Idempotency-* 헤더를 입력할 수 있게 정의한다', async () => {

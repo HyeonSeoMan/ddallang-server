@@ -42,15 +42,16 @@ async function bootDev(extraControllers: (new () => object)[] = []) {
 }
 
 describe('레지스트리 집합 = 컨트롤러 집합 = 문서 집합 (PD-19 (g), PD-9)', () => {
-  it('현재 앱은 GET /health 하나로 일치한다', async () => {
+  it('현재 앱의 레지스트리·컨트롤러·문서 경로 집합이 일치한다', async () => {
     const { app, document } = await bootDev();
     const controllers = collectControllerRoutes(app);
-    expect([...controllers]).toEqual(['GET /health']);
+    expect(controllers.has('GET /health')).toBe(true);
+    expect(controllers.size).toBeGreaterThan(1); // S1 이후의 기능 경로가 함께 있다
     expect(diffRoutes(controllers, collectDocumentRoutes(document))).toEqual({
       missingInDocument: [],
       extraInDocument: [],
     });
-    expect([...collectRegistryRoutes(app)]).toEqual(['GET /health']);
+    expect(collectRegistryRoutes(app)).toEqual(controllers);
     expect(diffRoutes(collectRegistryRoutes(app), controllers)).toEqual({
       missingInDocument: [],
       extraInDocument: [],
@@ -60,7 +61,8 @@ describe('레지스트리 집합 = 컨트롤러 집합 = 문서 집합 (PD-19 (g
   it('레지스트리는 컨트롤러가 추가되면 같이 늘고, 문서와 어긋나면 비교기가 보고한다', async () => {
     const { app, document } = await bootDev([HiddenController]);
     const registry = collectRegistryRoutes(app);
-    expect([...registry].sort()).toEqual(['GET /health', 'GET /hidden']);
+    expect(registry.has('GET /hidden')).toBe(true);
+    expect(registry.has('GET /health')).toBe(true);
     expect(registry).toEqual(collectControllerRoutes(app)); // 레지스트리 = 컨트롤러
     expect(diffRoutes(registry, collectDocumentRoutes(document)).missingInDocument).toEqual([
       'GET /hidden',

@@ -10,6 +10,7 @@ export interface RoomMemberContext {
   roomId: string;
   nickname: string;
   isHost: boolean;
+  createdAt: Date;
 }
 
 /** 키만 인증하는 요청(입장 `POST /invites/{code}/members`, 방 생성): 형식이 맞는 키와 그 해시. */
@@ -38,7 +39,7 @@ export class RoomMemberGuard implements CanActivate {
 
     const member = await this.prisma.client.roomMember.findUnique({
       where: { roomId_identityKeyHash: { roomId, identityKeyHash } },
-      select: { id: true, roomId: true, nickname: true, isHost: true },
+      select: { id: true, roomId: true, nickname: true, isHost: true, createdAt: true },
     });
     if (!member) throw new ApiError('ROOM_NOT_FOUND');
     memberByRequest.set(req, {
@@ -46,6 +47,7 @@ export class RoomMemberGuard implements CanActivate {
       roomId: member.roomId,
       nickname: member.nickname,
       isHost: member.isHost,
+      createdAt: member.createdAt,
     });
     return true;
   }

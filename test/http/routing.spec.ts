@@ -50,7 +50,7 @@ describe('라우트 단계 (PD-9, PD-20, S1 §3.3 0번·§4.8)', () => {
     it.each([
       '/',
       '/nope',
-      '/rooms',
+      '/room',
       '/rooms/r1/members/m1',
       '/rooms/r1/transfer-host',
       '/invites/abc/regenerate',
