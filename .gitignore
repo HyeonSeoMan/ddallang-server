@@ -7,3 +7,5 @@ coverage
 !.env.example
 *.log
 src/generated
+dist-test
+.ac-results.json

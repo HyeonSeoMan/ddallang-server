@@ -1,15 +1,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseService, RoomNotFoundError } from '../../src/common/db/database.service.js';
 import { PrismaService } from '../../src/common/db/prisma.service.js';
-import {
-  createTestSchema,
-  deferred,
-  sleep,
-  sqlState,
-  type TestSchema,
-} from '../helpers/test-db.js';
+import { createIsolatedDb, TEST_ROOM_DDL, type IsolatedDb } from '../helpers/isolated-db.js';
+import { deferred, sleep, sqlState } from '../helpers/util.js';
 
-let ts: TestSchema;
+let ts: IsolatedDb;
 let prisma: PrismaService;
 let db: DatabaseService;
 
@@ -23,11 +18,9 @@ function makeDb(overrides: Partial<ConstructorParameters<typeof DatabaseService>
 }
 
 beforeAll(async () => {
-  ts = await createTestSchema();
-  prisma = new PrismaService(
-    { DATABASE_URL: ts.databaseUrl, DB_POOL_MAX: 10 },
-    { schema: ts.schema },
-  );
+  ts = await createIsolatedDb();
+  await ts.fixtures(TEST_ROOM_DDL);
+  prisma = new PrismaService({ DATABASE_URL: ts.databaseUrl, DB_POOL_MAX: 10 });
   db = makeDb();
 });
 afterAll(async () => {

@@ -18,7 +18,9 @@
     "deps:check": "depcruise src --config .dependency-cruiser.cjs",
     "test": "vitest run",
     "postinstall": "prisma generate",
-    "db:generate": "prisma generate"
+    "db:generate": "prisma generate",
+    "ac:check": "node scripts/ac-check.mjs",
+    "test:ac": "vitest run --reporter=json --outputFile=.ac-results.json; node scripts/ac-check.mjs --results .ac-results.json"
   },
   "dependencies": {
     "@nestjs/common": "12.4.2",
