@@ -12,7 +12,7 @@ import {
 } from '../common/auth/room-member.guard.js';
 import { toMemberDto, type RoomDto, type RoomMemberDto } from '../common/domain/dto.js';
 import { JsonBody, type BodyInput } from '../common/http/json-body.js';
-import { ApiErrorResponses, ApiIdentityKey } from '../common/swagger-docs.js';
+import { ApiErrors, ApiIdentityKey, ApiRoomIdParam } from '../common/swagger-docs.js';
 import {
   ROOM_MEMBER_SCHEMA,
   ROOM_SCHEMA,
@@ -33,6 +33,7 @@ export class RoomsController {
   @ApiBody({
     schema: {
       type: 'object',
+      example: { name: 'Friday 7', unit: '원', nickname: '민수' },
       required: ['name', 'unit', 'nickname'],
       properties: {
         name: { type: 'string' },
@@ -46,7 +47,7 @@ export class RoomsController {
     description: '방과 방장 RoomMember',
     schema: obj({ room: ROOM_SCHEMA, me: ROOM_MEMBER_SCHEMA }),
   })
-  @ApiErrorResponses(401, 422)
+  @ApiErrors('UNAUTHENTICATED', 'VALIDATION_FAILED')
   create(
     @CurrentIdentity() identity: IdentityContext,
     @JsonBody() body: BodyInput,
@@ -63,7 +64,8 @@ export class RoomsController {
     description: '방과 요청자',
     schema: obj({ room: ROOM_SCHEMA, me: ROOM_MEMBER_SCHEMA }),
   })
-  @ApiErrorResponses(401, 404)
+  @ApiRoomIdParam()
+  @ApiErrors('UNAUTHENTICATED', 'ROOM_NOT_FOUND')
   async get(
     @CurrentMember() member: RoomMemberContext,
   ): Promise<{ room: RoomDto; me: RoomMemberDto }> {
@@ -80,9 +82,11 @@ export class InvitesController {
   constructor(private readonly rooms: RoomsService) {}
 
   @Get(':inviteCode')
-  @ApiIdentityKey()
   @ApiOperation({
-    summary: '초대 링크 조회 (S1 §4.2). Authorization은 선택, 형식이 틀리면 키 없음으로 본다',
+    summary: '초대 링크 조회 (S1 §4.2)',
+    description:
+      '`Authorization`은 선택이다. 형식이 틀린 값은 오류 없이 "키 없음"으로 본다. `isMember`는 요청에 실린 키가 이 방의 RoomMember인지만 알려 준다.',
+    security: [{}, { 'identity-key': [] }],
   })
   @ApiResponse({
     status: 200,
@@ -96,7 +100,7 @@ export class InvitesController {
       isMember: { type: 'boolean' },
     }),
   })
-  @ApiErrorResponses(404)
+  @ApiErrors('INVITE_NOT_FOUND')
   invite(
     @Param('inviteCode') inviteCode: string,
     @Headers('authorization') authorization: string | undefined,
@@ -115,7 +119,13 @@ export class InvitesController {
   @UseGuards(IdentityKeyGuard)
   @ApiIdentityKey()
   @ApiOperation({ summary: '입장 (S1 §4.3). 같은 키면 200 복원, 새 RoomMember면 201' })
-  @ApiBody({ schema: { type: 'object', properties: { nickname: { type: 'string' } } } })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      example: { nickname: '지연' },
+      properties: { nickname: { type: 'string' } },
+    },
+  })
   @ApiResponse({
     status: 200,
     description: '같은 키로 복원',
@@ -126,7 +136,13 @@ export class InvitesController {
     description: '새 RoomMember',
     schema: obj({ room: ROOM_SUMMARY_SCHEMA, me: ROOM_MEMBER_SCHEMA }),
   })
-  @ApiErrorResponses(401, 404, 409, 422)
+  @ApiErrors(
+    'UNAUTHENTICATED',
+    'INVITE_NOT_FOUND',
+    'VALIDATION_FAILED',
+    'NICKNAME_TAKEN',
+    'MEMBER_LIMIT_EXCEEDED',
+  )
   async join(
     @Param('inviteCode') inviteCode: string,
     @CurrentIdentity() identity: IdentityContext,
