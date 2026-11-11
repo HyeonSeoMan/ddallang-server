@@ -1,6 +1,7 @@
 import { PATH_METADATA, METHOD_METADATA } from '@nestjs/common/constants.js';
 import { RequestMethod, type INestApplication } from '@nestjs/common';
 import { ModulesContainer } from '@nestjs/core';
+import { RouteRegistry } from '../../src/common/routing/route-registry.js';
 
 /** "METHOD /path" 형식. 경로 매개변수는 OpenAPI 표기({id})로 맞춘다. */
 export type RouteKey = string;
@@ -77,4 +78,13 @@ export function diffRoutes(controllers: Set<RouteKey>, document: Set<RouteKey>):
     missingInDocument: [...controllers].filter((r) => !document.has(r)).sort(),
     extraInDocument: [...document].filter((r) => !controllers.has(r)).sort(),
   };
+}
+
+/** 라우트 레지스트리의 (메서드, 경로) 집합. 컨트롤러 수집과 독립된 구현이라 서로 대조할 수 있다. */
+export function collectRegistryRoutes(app: INestApplication): Set<RouteKey> {
+  const keys = [...app.get(RouteRegistry).routeKeys()].map((k) => {
+    const [method, path] = k.split(' ') as [string, string];
+    return `${method} ${join(path)}`;
+  });
+  return filterIgnored(new Set(keys));
 }

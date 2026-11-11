@@ -9,6 +9,7 @@ import { quietLog, testEnv } from './helpers/env.js';
 import {
   collectControllerRoutes,
   collectDocumentRoutes,
+  collectRegistryRoutes,
   diffRoutes,
 } from './helpers/route-parity.js';
 
@@ -40,7 +41,7 @@ async function bootDev(extraControllers: (new () => object)[] = []) {
   return { app, document };
 }
 
-describe('OpenAPI 경로 집합 = 컨트롤러 경로 집합 (PD-19 (g))', () => {
+describe('레지스트리 집합 = 컨트롤러 집합 = 문서 집합 (PD-19 (g), PD-9)', () => {
   it('현재 앱은 GET /health 하나로 일치한다', async () => {
     const { app, document } = await bootDev();
     const controllers = collectControllerRoutes(app);
@@ -49,6 +50,26 @@ describe('OpenAPI 경로 집합 = 컨트롤러 경로 집합 (PD-19 (g))', () =>
       missingInDocument: [],
       extraInDocument: [],
     });
+    expect([...collectRegistryRoutes(app)]).toEqual(['GET /health']);
+    expect(diffRoutes(collectRegistryRoutes(app), controllers)).toEqual({
+      missingInDocument: [],
+      extraInDocument: [],
+    });
+  });
+
+  it('레지스트리는 컨트롤러가 추가되면 같이 늘고, 문서와 어긋나면 비교기가 보고한다', async () => {
+    const { app, document } = await bootDev([HiddenController]);
+    const registry = collectRegistryRoutes(app);
+    expect([...registry].sort()).toEqual(['GET /health', 'GET /hidden']);
+    expect(registry).toEqual(collectControllerRoutes(app)); // 레지스트리 = 컨트롤러
+    expect(diffRoutes(registry, collectDocumentRoutes(document)).missingInDocument).toEqual([
+      'GET /hidden',
+    ]);
+  });
+
+  it('레지스트리에 있는데 컨트롤러에 없는 경로(예: 잘못된 비-Spec 항목)는 보고한다', () => {
+    const diff = diffRoutes(new Set(['GET /health', 'GET /ghost']), new Set(['GET /health']));
+    expect(diff.missingInDocument).toEqual(['GET /ghost']);
   });
 
   it('문서에서 빠진 경로(@ApiExcludeEndpoint)가 있으면 비교기가 실패를 보고한다', async () => {

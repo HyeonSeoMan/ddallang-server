@@ -2,6 +2,7 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
+import { expectApiError } from './helpers/contract.js';
 import { quietLog, testEnv } from './helpers/env.js';
 
 let app: NestExpressApplication | undefined;
@@ -42,13 +43,13 @@ describe('Swagger 부트스트랩 (PD-19)', () => {
 
   it('기본 YAML 경로는 만들지 않는다', async () => {
     const http = await boot('development');
-    expect((await http.get('/api-docs-yaml')).status).toBe(404);
+    expectApiError(await http.get('/api-docs-yaml'), 404, 'ROUTE_NOT_FOUND');
   });
 
   it.each(['test', 'production'] as const)('%s에서는 등록되지 않는다', async (nodeEnv) => {
     const http = await boot(nodeEnv);
     for (const path of ['/api-docs', '/api-docs-json', '/api-docs-yaml']) {
-      expect((await http.get(path)).status).toBe(404);
+      expectApiError(await http.get(path), 404, 'ROUTE_NOT_FOUND');
     }
   });
 });
