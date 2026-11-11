@@ -1,5 +1,10 @@
 import { Module } from '@nestjs/common';
+import { InvitesController, RoomsController } from './rooms.controller.js';
+import { RoomsService } from './rooms.service.js';
 
-/** BE-F1 뼈대. 기능은 해당 Spec Task에서 채운다. */
-@Module({})
+/** S1 방·초대·입장(BE-S1-2~3). */
+@Module({
+  controllers: [RoomsController, InvitesController],
+  providers: [RoomsService],
+})
 export class RoomsModule {}

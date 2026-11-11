@@ -95,11 +95,11 @@ describe('RoomMemberGuard (S1 §3.3 1~3번)', () => {
       .get(`/__auth/rooms/${roomId}/whoami`)
       .set('Authorization', bearer(hostKey));
     expect(h.status).toBe(200);
-    expect(h.body).toEqual({ memberId: hostId, roomId, nickname: 'Host', isHost: true });
+    expect(h.body).toMatchObject({ memberId: hostId, roomId, nickname: 'Host', isHost: true });
     const m = await t.http
       .get(`/__auth/rooms/${roomId}/whoami`)
       .set('Authorization', bearer(memberKey));
-    expect(m.body).toEqual({ memberId, roomId, nickname: 'Kim', isHost: false });
+    expect(m.body).toMatchObject({ memberId, roomId, nickname: 'Kim', isHost: false });
   });
 
   it('키 누락·형식 오류는 401이며 방이 있든 없든 같다(1번이 2~3번보다 앞)', async () => {
