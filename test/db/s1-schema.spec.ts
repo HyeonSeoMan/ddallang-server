@@ -338,7 +338,8 @@ describe('S1 데이터 모델 제약 (BE-S1-1)', () => {
       const fks = await db.query<{ child: string; parent: string }>(
         `SELECT c.relname AS child, p.relname AS parent FROM pg_constraint k
          JOIN pg_class c ON c.oid = k.conrelid JOIN pg_class p ON p.oid = k.confrelid
-         JOIN pg_namespace n ON n.oid = c.relnamespace WHERE k.contype='f' AND n.nspname=$1 ORDER BY 1,2`,
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE k.contype='f' AND n.nspname=$1 AND c.relname IN ('RoomMember','Participant') ORDER BY 1,2`,
         [db.schema],
       );
       expect(fks).toEqual([

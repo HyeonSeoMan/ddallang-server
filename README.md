@@ -100,6 +100,7 @@ test/          계약·동시성·제약 시험, 다중 프로세스 하네스(t
 
 ## 알려진 한계와 보류 항목
 
+- 멱등 기록 정리(`expiresAt + 1시간` 이후 삭제)는 10분 주기 작업이며 `test` 환경에서는 돌지 않습니다.
 - `REQUEST_TIMEOUT_MS`는 DB 트랜잭션 마감에만 연결되어 있고 HTTP 서버의 요청 제한과는 아직 연결되지 않았습니다(오류 코드·소유 Task 미정).
 - 배포 환경(PD-16)과 방 보관·삭제(OQ-034)는 정하지 않았습니다. 운영 배포 전에 정합니다.
 - `prisma migrate deploy` 경로와 `_prisma_migrations` 이력은 아직 검증하지 않았습니다(시험은 SQL을 직접 적용).
@@ -108,4 +109,4 @@ test/          계약·동시성·제약 시험, 다중 프로세스 하네스(t
 
 ## 계획
 
-`BE-F6 → S2(거래) → S3(조회·손익) → S5(SSE) → S4(종료·정산) → BE-Z1(통합 검증, 개발 종료 뒤 Codex 독립 검수)`. 자세한 Task 표는 `ddallang`의 `docs/plans/server/tasks.md`를 봅니다.
+`S3(조회·손익) → S5(SSE) → S4(종료·정산) → BE-Z1(통합 검증, 개발 종료 뒤 Codex 독립 검수)`. 자세한 Task 표는 `ddallang`의 `docs/plans/server/tasks.md`를 봅니다.
