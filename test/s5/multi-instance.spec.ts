@@ -1,6 +1,5 @@
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { ac } from '../helpers/contract.js';
 import { startInstances, stopAll, type Instance } from '../helpers/instances.js';
 import { baseDatabaseUrl, createIsolatedDb, type IsolatedDb } from '../helpers/isolated-db.js';
 import { createTx, makeRoom } from './s5-helpers.js';
@@ -33,37 +32,30 @@ afterAll(async () => {
 });
 
 describe('다중 인스턴스 이벤트 전달·유실 복구 (BE-S5-5)', () => {
-  it(
-    ac(
-      ['AC-SYS-003-2'],
-      'S5 §4.2',
-      '한 인스턴스가 커밋한 변경이 다른 인스턴스에 붙은 스트림에 전달된다',
-    ),
-    async () => {
-      const r = await makeRoom(inst[0]!);
-      const onA = await openStream(inst[0]!, r.roomId, r.key);
-      const onB = await openStream(inst[1]!, r.roomId, r.key);
-      try {
-        await Promise.all(
-          [onA, onB].map((s) => s.waitFor((e) => e.some((x) => x.event === 'ready'))),
+  it('한 인스턴스가 커밋한 변경이 다른 인스턴스에 붙은 스트림에 전달된다', async () => {
+    const r = await makeRoom(inst[0]!);
+    const onA = await openStream(inst[0]!, r.roomId, r.key);
+    const onB = await openStream(inst[1]!, r.roomId, r.key);
+    try {
+      await Promise.all(
+        [onA, onB].map((s) => s.waitFor((e) => e.some((x) => x.event === 'ready'))),
+      );
+      await createTx(inst[0]!, r, 100);
+      await createTx(inst[1]!, r, 200);
+      for (const s of [onA, onB]) {
+        const ev = await s.waitFor(
+          (e) => e.filter((x) => x.event === 'transaction.created').length >= 2,
         );
-        await createTx(inst[0]!, r, 100);
-        await createTx(inst[1]!, r, 200);
-        for (const s of [onA, onB]) {
-          const ev = await s.waitFor(
-            (e) => e.filter((x) => x.event === 'transaction.created').length >= 2,
-          );
-          const revs = ev
-            .filter((x) => x.event === 'transaction.created')
-            .map((x) => x.data.revision);
-          expect(revs).toEqual([4, 5]); // 두 스트림이 같은 순서를 본다
-        }
-      } finally {
-        onA.close();
-        onB.close();
+        const revs = ev
+          .filter((x) => x.event === 'transaction.created')
+          .map((x) => x.data.revision);
+        expect(revs).toEqual([4, 5]); // 두 스트림이 같은 순서를 본다
       }
-    },
-  );
+    } finally {
+      onA.close();
+      onB.close();
+    }
+  });
 
   it('LISTEN 연결이 끊겨 통지를 놓쳐도 다음 하트비트의 revision이 뒤처짐을 알리고, 재연결 뒤 새 이벤트가 다시 전달된다', async () => {
     const r = await makeRoom(inst[0]!);

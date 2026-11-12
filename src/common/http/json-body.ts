@@ -15,7 +15,7 @@ export function markBodyParseFailed(req: object): void {
 }
 
 /** 파싱 실패 중 문법은 올바른 JSON이지만 최상위가 객체·배열이 아닌 본문(`5`, `"x"`, `null`). */
-const nonObjectJsonRequests = new WeakSet<object>();
+const nonObjectJsonRequests = new WeakMap<object, unknown>();
 const rawBodies = new WeakMap<object, string>();
 
 /**
@@ -34,8 +34,8 @@ export function jsonBodyParser(): RequestHandler {
       if (err) {
         markBodyParseFailed(req);
         try {
-          JSON.parse(rawBodies.get(req) ?? '');
-          nonObjectJsonRequests.add(req); // 문법은 올바르다: 최상위가 객체가 아닌 JSON
+          const value: unknown = JSON.parse(rawBodies.get(req) ?? '');
+          nonObjectJsonRequests.set(req, value); // 문법은 올바르다: 최상위가 객체가 아닌 JSON
         } catch {
           // 문법 오류
         }
@@ -52,8 +52,12 @@ export interface BodyInput {
   body: unknown;
   /** 파싱 실패 중, 문법은 올바른 JSON이지만 최상위가 객체가 아니다 */
   nonObjectJson: boolean;
+  /** `nonObjectJson`일 때 파싱된 값(지문에 넣어 값이 다르면 다른 내용이 되게 한다) */
+  nonObjectValue?: unknown;
   /** JSON이 아닌 Content-Type으로 본문 바이트가 왔다(파서가 건너뛰어 `body`가 비어 있다) */
   unparsedPayload: boolean;
+  /** `unparsedPayload`일 때 Content-Type과 길이(본문 내용을 읽지 않으므로 이것으로 내용을 구분한다) */
+  unparsedSignature?: string;
 }
 
 /** 컨트롤러 매개변수로 본문과 파싱 실패 표시를 함께 받는다. */
@@ -65,10 +69,12 @@ export const JsonBody = createParamDecorator((_data: unknown, ctx: ExecutionCont
     parseFailed,
     body: req.body as unknown,
     nonObjectJson: nonObjectJsonRequests.has(req),
+    nonObjectValue: nonObjectJsonRequests.get(req),
     unparsedPayload:
       !parseFailed &&
       req.body === undefined &&
       (length > 0 || req.headers['transfer-encoding'] !== undefined),
+    unparsedSignature: `${String(req.headers['content-type'] ?? '')}|${length}`,
   };
 });
 

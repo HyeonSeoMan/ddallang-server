@@ -11,7 +11,7 @@
 | `pnpm typecheck`, `pnpm lint`, `pnpm format:check`                               | 통과                                                            |
 | `pnpm deps:check`                                                                | 위반 없음(75 모듈, 252 의존)                                    |
 | `pnpm build`                                                                     | 통과                                                            |
-| `pnpm test:ac`(전체 시험 + AC 통과 확인)                                         | 52 파일, 615 시험 통과, 실패·skip 0                             |
+| `pnpm test:ac`(전체 시험 + AC 통과 확인)                                         | 52 파일, 617 시험 통과, 실패·skip 0                             |
 | `pnpm ac:check`(static) / results 모드                                           | 필수 191개 중 시험 191, 누락 0(둘 다 통과)                      |
 | `test/swagger.spec.ts`, `test/openapi-parity.spec.ts`, `test/readme-api.spec.ts` | Swagger 경로·메서드 집합 = 구현 경로(PD-19), README API 표 일치 |
 
@@ -31,13 +31,15 @@ AC가 없는 기반 Task(BE-S5-1·5·6, BE-S4-6 등)는 `ac:check --allow-empty`
 
 | 변경                       | 변경 수 | 전달 p95 / 최대 | 화면 반영 p95 / 최대 |
 | -------------------------- | ------- | --------------- | -------------------- |
-| transaction.created        | 100     | 8 / 13 ms       | 14 / 21 ms           |
-| transaction.updated        | 100     | 7 / 8 ms        | 12 / 13 ms           |
-| transaction.deleted        | 100     | 6 / 8 ms        | 12 / 13 ms           |
-| participant.created        | 10      | 6 / 6 ms        | 11 / 11 ms           |
-| participant.status_changed | 100     | 5 / 6 ms        | 10 / 11 ms           |
-| room.ended                 | 10      | 8 / 9 ms        | 15 / 15 ms           |
-| 전체                       | 420     | 7 / 13 ms       | 13 / 21 ms           |
+| transaction.created        | 100     | 8 / 14 ms       | 35 / 54 ms           |
+| transaction.updated        | 100     | 6 / 7 ms        | 31 / 35 ms           |
+| transaction.deleted        | 100     | 6 / 9 ms        | 32 / 54 ms           |
+| participant.created        | 10      | 5 / 6 ms        | 29 / 32 ms           |
+| participant.status_changed | 100     | 4 / 6 ms        | 29 / 36 ms           |
+| room.ended                 | 10      | 5 / 5 ms        | 31 / 33 ms           |
+| 전체                       | 320     | 7 / 14 ms       | 32 / 54 ms           |
+
+화면 반영은 변경마다 접속자 10명이 각자 이벤트를 받은 뒤 5개 조회를 모두 끝낸 시각이다(변경 수 × 10건을 측정).
 
 - 판정: 종류별·전체 모두 전달 p95 ≤ 1초·최대 ≤ 3초, 화면 반영 p95 ≤ 3초·최대 ≤ 5초(§6.7 목표) 충족(시험이 종류별로 단언).
 - 유실 시 수렴(`test/s4/realtime.spec.ts`): 통지 차단 → 하트비트 → 5개 조회 15.0초(기준 20초).

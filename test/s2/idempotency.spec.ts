@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import pg from 'pg';
 import { PrismaService } from '../../src/common/db/prisma.service.js';
 import { IdempotencyService } from '../../src/idempotency/idempotency.service.js';
@@ -558,7 +558,17 @@ describe('유효 기간과 만료 (S2 §5.4)', () => {
         // 수신 시점에는 만료까지 약 1.5초 남은 요청
         const idem = { key: fresh().key, at: at(-24 * HOUR + 1_500) };
         const pending = postTx(s.http, r.c.roomId, r.c.key, validBody(r), idem).then((x) => x);
-        await new Promise((ok) => setTimeout(ok, 2_500));
+        // 요청이 실제로 방 잠금 앞에서 기다리는 것을 확인한 뒤 유효 기간(1.5초)이 지나도록 둔다
+        await vi.waitFor(
+          async () => {
+            const w = await holder.query(
+              `SELECT 1 FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()`,
+            );
+            expect(w.rowCount).toBeGreaterThan(0);
+          },
+          { timeout: 10_000, interval: 50 },
+        );
+        await new Promise((ok) => setTimeout(ok, 2_000));
         await holder.query('COMMIT');
         const res = await pending;
         expectApiError(res, 409, 'IDEMPOTENCY_KEY_EXPIRED');

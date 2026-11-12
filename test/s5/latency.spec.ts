@@ -47,7 +47,7 @@ async function liveRoom(participants: number, txs: number): Promise<Live> {
 
 const samples: Record<string, { deliver: number[]; screen: number[] }> = {};
 
-/** 변경 한 건: T0는 요청 송신 시각(보수 기준), 10개 클라이언트의 수신과 한 클라이언트의 5개 조회 완료를 잰다. */
+/** 변경 한 건: T0는 요청 송신 시각(보수 기준), 10개 클라이언트의 수신과 10개 클라이언트 각각의 5개 조회 완료를 잰다. */
 async function measure(
   kind: string,
   live: Live,
@@ -60,18 +60,19 @@ async function measure(
   const res = (await run()) as { status: number; body: unknown };
   if (res.status >= 300)
     throw new Error(`${kind} 요청 실패 ${res.status} ${JSON.stringify(res.body)}`);
-  const got = await Promise.all(
+  const per = await Promise.all(
     live.streams.map(async (s, i) => {
       const ev = await s.waitFor((e) => e.slice(from[i]!).some((x) => x.event === event), 15_000);
-      return ev.slice(from[i]!).find((x) => x.event === event)!.receivedAt - t0;
+      const deliver = ev.slice(from[i]!).find((x) => x.event === event)!.receivedAt - t0;
+      await resync(at(i), live.room, live.keys[i]!); // 클라이언트마다 5개 조회를 끝낸다
+      return { deliver, screen: Date.now() - t0 };
     }),
   );
-  const m = n % live.keys.length;
-  await resync(at(m), live.room, live.keys[m]!);
-  const screen = Date.now() - t0;
+  const got = per.map((p) => p.deliver);
+  const screens = per.map((p) => p.screen);
   const bucket = (samples[kind] ??= { deliver: [], screen: [] });
   bucket.deliver.push(...got);
-  bucket.screen.push(screen);
+  bucket.screen.push(...screens);
 }
 
 const closeLive = (l: Live) => l.streams.forEach((s) => s.close());
@@ -225,7 +226,7 @@ describe('실시간 지연 측정 (S5 §6.7 표 그대로, BE-S5-4·BE-S4-7)', (
         all.deliver.push(...v.deliver);
         all.screen.push(...v.screen);
         lines.push(
-          `${k}: 변경 ${v.screen.length}건·수신 ${v.deliver.length}건 전달 p95=${pct(v.deliver, 0.95)}ms max=${Math.max(...v.deliver)}ms / 화면 p95=${pct(v.screen, 0.95)}ms max=${Math.max(...v.screen)}ms`,
+          `${k}: 클라이언트 측정 ${v.screen.length}건(수신 ${v.deliver.length}건) 전달 p95=${pct(v.deliver, 0.95)}ms max=${Math.max(...v.deliver)}ms / 화면 p95=${pct(v.screen, 0.95)}ms max=${Math.max(...v.screen)}ms`,
         );
         expect(pct(v.deliver, 0.95), k).toBeLessThanOrEqual(1000);
         expect(Math.max(...v.deliver), k).toBeLessThanOrEqual(3000);
