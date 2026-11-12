@@ -12,7 +12,6 @@ import {
   postTx,
   putTx,
   setupRoom,
-  validBody,
   type S2Env,
   type Setup,
 } from '../s2/s2-helpers.js';
@@ -91,7 +90,7 @@ describe('GET /rooms/{roomId}/balances (S3 §4.2, §6.1)', () => {
       const d = (await addParticipant(s.http, r.c, 'Dd')).body.participant.id as string; // order 4, 거래 없음
       await pay(r, r.p.c, r.p.b, 100); // B +100 (order 2)
       await pay(r, r.p.c, r.p.a, 100); // A +100 (order 1)
-      await pay(r, r.p.c, r.p.c === r.p.a ? r.p.b : r.p.b, 0 + 100); // C -300 total
+      await pay(r, r.p.c, r.p.b, 100); // C -300 total
       const rows = await bal(r);
       expect(rows.map((x) => [x.participantId, x.balance])).toEqual(
         [
@@ -328,5 +327,3 @@ describe('순손익 속성 시험 (NFR-001)', () => {
     },
   );
 });
-
-void validBody;

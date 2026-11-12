@@ -8,7 +8,6 @@ import {
   StreamLeaseService,
 } from '../../src/realtime/stream-lease.service.js';
 import { createIsolatedDb, type IsolatedDb } from '../helpers/isolated-db.js';
-import { ac } from '../helpers/contract.js';
 import { sleep } from '../helpers/util.js';
 
 vi.setConfig({ testTimeout: 60_000 });
@@ -62,32 +61,25 @@ describe('임대 한도·갱신·정리 (실제 PostgreSQL, 짧은 TTL=3초)', (
     expect([MEMBER_STREAM_LIMIT, ROOM_STREAM_LIMIT, LEASE_TTL_MS]).toEqual([5, 50, 15_000]);
   });
 
-  it(
-    ac(
-      ['AC-SYS-003-5'],
-      'S5 §4.1',
-      'RoomMember당 5개까지만 허용하고 6번째 새 연결은 거부하며 기존 연결은 유지한다. 해제하면 슬롯이 돌아온다',
-    ),
-    async () => {
-      const { roomId, members } = await room(2);
-      const s = svc();
-      const open = [];
-      for (let i = 0; i < 5; i++) {
-        const r = await s.acquire({ roomId, memberId: members[0]! }, () => undefined);
-        expect(r.ok).toBe(true);
-        if (r.ok) open.push(r.lease);
-      }
-      expect(await s.acquire({ roomId, memberId: members[0]! }, () => undefined)).toEqual({
-        ok: false,
-        reason: 'limit',
-      });
-      expect(open.every((l) => l.alive())).toBe(true); // 기존 5개는 유지된다
-      expect((await s.acquire({ roomId, memberId: members[1]! }, () => undefined)).ok).toBe(true); // 다른 멤버는 별도 한도
-      await s.release(open[0]!.id);
-      expect((await s.acquire({ roomId, memberId: members[0]! }, () => undefined)).ok).toBe(true);
-      expect(await rows(roomId)).toBe(6); // 5 + 1(다른 멤버)
-    },
-  );
+  it('RoomMember당 5개까지만 허용하고 6번째 새 연결은 거부하며 기존 연결은 유지한다. 해제하면 슬롯이 돌아온다', async () => {
+    const { roomId, members } = await room(2);
+    const s = svc();
+    const open = [];
+    for (let i = 0; i < 5; i++) {
+      const r = await s.acquire({ roomId, memberId: members[0]! }, () => undefined);
+      expect(r.ok).toBe(true);
+      if (r.ok) open.push(r.lease);
+    }
+    expect(await s.acquire({ roomId, memberId: members[0]! }, () => undefined)).toEqual({
+      ok: false,
+      reason: 'limit',
+    });
+    expect(open.every((l) => l.alive())).toBe(true); // 기존 5개는 유지된다
+    expect((await s.acquire({ roomId, memberId: members[1]! }, () => undefined)).ok).toBe(true); // 다른 멤버는 별도 한도
+    await s.release(open[0]!.id);
+    expect((await s.acquire({ roomId, memberId: members[0]! }, () => undefined)).ok).toBe(true);
+    expect(await rows(roomId)).toBe(6); // 5 + 1(다른 멤버)
+  });
 
   it('방당 50개 한도: 멤버 10명이 5개씩 채우면 새 연결은 거부된다(멤버 한도와 별개로 방 한도)', async () => {
     const { roomId, members } = await room(11);
@@ -149,53 +141,46 @@ describe('임대 한도·갱신·정리 (실제 PostgreSQL, 짧은 TTL=3초)', (
     expect(row!.left).toBeGreaterThan(0.2);
   });
 
-  it(
-    ac(
-      ['AC-SYS-003-5'],
-      'S5 §4.1 RK-14',
-      'DB 갱신이 막히면 스트림이 임대 만료 전에 스스로 닫히고, 그동안 새 연결이 한도를 넘지 않는다',
-    ),
-    async () => {
-      const { roomId, members } = await room(1);
-      const a = svc();
-      let closedAt = 0;
-      const t0 = Date.now();
-      const leases = [];
-      for (let i = 0; i < 5; i++) {
-        const r = await a.acquire({ roomId, memberId: members[0]! }, () => {
-          closedAt ||= Date.now();
-        });
-        if (r.ok) leases.push(r.lease);
-      }
-      expect(leases).toHaveLength(5);
-      // 다른 연결이 이 인스턴스의 임대 행을 잠가 갱신 UPDATE를 막는다
-      const blocker = new (await import('pg')).default.Client({ connectionString: db.databaseUrl });
-      await blocker.connect();
-      await blocker.query('BEGIN');
-      await blocker.query(`SELECT "id" FROM "StreamLease" WHERE "roomId"=$1 FOR UPDATE`, [roomId]);
-      try {
-        const b = svc();
-        // 만료 전(약 1.5초): 아직 DB에는 5개가 남아 있어 새 연결은 거부된다
-        await sleep(1_200);
-        expect(await b.acquire({ roomId, memberId: members[0]! }, () => undefined)).toEqual({
-          ok: false,
-          reason: 'limit',
-        });
-        // 자기 종료 마감(2T/3 = 2초, 획득 시각 기준) 뒤에는 닫혀 있다 — DB 만료(3초)보다 앞선다
-        await vi.waitFor(() => expect(closedAt).toBeGreaterThan(0), {
-          timeout: 5_000,
-          interval: 50,
-        });
-        const closedAfter = closedAt - t0;
-        expect(closedAfter).toBeGreaterThanOrEqual(1_700);
-        expect(closedAfter).toBeLessThan(TTL - 200); // DB 만료 전에 스스로 닫혔다
-        expect(leases.every((l) => !l.alive())).toBe(true);
-      } finally {
-        await blocker.query('ROLLBACK');
-        await blocker.end();
-      }
-    },
-  );
+  it('DB 갱신이 막히면 스트림이 임대 만료 전에 스스로 닫히고, 그동안 새 연결이 한도를 넘지 않는다', async () => {
+    const { roomId, members } = await room(1);
+    const a = svc();
+    let closedAt = 0;
+    const t0 = Date.now();
+    const leases = [];
+    for (let i = 0; i < 5; i++) {
+      const r = await a.acquire({ roomId, memberId: members[0]! }, () => {
+        closedAt ||= Date.now();
+      });
+      if (r.ok) leases.push(r.lease);
+    }
+    expect(leases).toHaveLength(5);
+    // 다른 연결이 이 인스턴스의 임대 행을 잠가 갱신 UPDATE를 막는다
+    const blocker = new (await import('pg')).default.Client({ connectionString: db.databaseUrl });
+    await blocker.connect();
+    await blocker.query('BEGIN');
+    await blocker.query(`SELECT "id" FROM "StreamLease" WHERE "roomId"=$1 FOR UPDATE`, [roomId]);
+    try {
+      const b = svc();
+      // 만료 전(약 1.5초): 아직 DB에는 5개가 남아 있어 새 연결은 거부된다
+      await sleep(1_200);
+      expect(await b.acquire({ roomId, memberId: members[0]! }, () => undefined)).toEqual({
+        ok: false,
+        reason: 'limit',
+      });
+      // 자기 종료 마감(2T/3 = 2초, 획득 시각 기준) 뒤에는 닫혀 있다 — DB 만료(3초)보다 앞선다
+      await vi.waitFor(() => expect(closedAt).toBeGreaterThan(0), {
+        timeout: 5_000,
+        interval: 50,
+      });
+      const closedAfter = closedAt - t0;
+      expect(closedAfter).toBeGreaterThanOrEqual(1_700);
+      expect(closedAfter).toBeLessThan(TTL - 200); // DB 만료 전에 스스로 닫혔다
+      expect(leases.every((l) => !l.alive())).toBe(true);
+    } finally {
+      await blocker.query('ROLLBACK');
+      await blocker.end();
+    }
+  });
 
   it('임대를 잃은(DB에서 이미 만료·삭제된) 연결은 다음 갱신에서 즉시 닫힌다', async () => {
     const { roomId, members } = await room(1);
@@ -283,65 +268,51 @@ describe('마감은 요청 송신 시각 기준이다 (가짜 시계·가짜 DB,
     await f.s.onModuleDestroy();
   });
 
-  it(
-    ac(
-      ['AC-SYS-003-5'],
-      'S5 §4.1',
-      '최초 임대 응답 지연: 응답이 마감(송신+2T/3) 뒤에 도착하면 연결을 열지 않고 임대를 반납한다(늦은 응답 폐기)',
-    ),
-    async () => {
-      const f = fixture({ txDelay: SELF + 500 });
-      const r = await f.s.acquire({ roomId: 'r', memberId: 'm' }, () => undefined);
-      expect(r).toEqual({ ok: false, reason: 'late' });
-      expect(f.calls).toContain('delete');
-      expect(f.s.localCount).toBe(0);
-      // 마감 직전에 도착한 응답은 받아들인다
-      const g = fixture({ txDelay: SELF - 1 });
-      expect((await g.s.acquire({ roomId: 'r', memberId: 'm' }, () => undefined)).ok).toBe(true);
-      await g.s.onModuleDestroy();
-    },
-  );
+  it('최초 임대 응답 지연: 응답이 마감(송신+2T/3) 뒤에 도착하면 연결을 열지 않고 임대를 반납한다(늦은 응답 폐기)', async () => {
+    const f = fixture({ txDelay: SELF + 500 });
+    const r = await f.s.acquire({ roomId: 'r', memberId: 'm' }, () => undefined);
+    expect(r).toEqual({ ok: false, reason: 'late' });
+    expect(f.calls).toContain('delete');
+    expect(f.s.localCount).toBe(0);
+    // 마감 직전에 도착한 응답은 받아들인다
+    const g = fixture({ txDelay: SELF - 1 });
+    expect((await g.s.acquire({ roomId: 'r', memberId: 'm' }, () => undefined)).ok).toBe(true);
+    await g.s.onModuleDestroy();
+  });
 
-  it(
-    ac(
-      ['AC-SYS-003-5'],
-      'S5 §4.1',
-      '응답 지연 시간선: 갱신 송신 0·5·10초에 응답이 0·9·18초에 와도 마감은 송신 기준이고 응답 수신 시각이 마감을 늘리거나 되살리지 않는다',
-    ),
-    async () => {
-      const f = fixture();
-      let closedAt = -1;
-      f.at(0);
-      const l = await lease(f, () => (closedAt = f.clock()));
-      expect(l.deadline).toBe(10_000); // 송신 0 → 마감 10초
+  it('응답 지연 시간선: 갱신 송신 0·5·10초에 응답이 0·9·18초에 와도 마감은 송신 기준이고 응답 수신 시각이 마감을 늘리거나 되살리지 않는다', async () => {
+    const f = fixture();
+    let closedAt = -1;
+    f.at(0);
+    const l = await lease(f, () => (closedAt = f.clock()));
+    expect(l.deadline).toBe(10_000); // 송신 0 → 마감 10초
 
-      // 송신 0초, 응답 0초: 마감 = 0 + 10 = 10초(변화 없음)
-      f.at(0);
-      f.state.renewDelay = 0;
-      await f.s.renewAll();
-      expect(l.deadline).toBe(10_000);
+    // 송신 0초, 응답 0초: 마감 = 0 + 10 = 10초(변화 없음)
+    f.at(0);
+    f.state.renewDelay = 0;
+    await f.s.renewAll();
+    expect(l.deadline).toBe(10_000);
 
-      // 송신 5초, 응답 9초(응답이 마감 10초 전에 도착): 마감 = 5 + 10 = 15초 (수신 9 + 10 = 19초가 아니다)
-      f.at(5_000);
-      f.state.renewDelay = 4_000;
-      await f.s.renewAll();
-      expect(l.deadline).toBe(15_000);
-      expect(l.deadline).toBeLessThan(9_000 + SELF);
+    // 송신 5초, 응답 9초(응답이 마감 10초 전에 도착): 마감 = 5 + 10 = 15초 (수신 9 + 10 = 19초가 아니다)
+    f.at(5_000);
+    f.state.renewDelay = 4_000;
+    await f.s.renewAll();
+    expect(l.deadline).toBe(15_000);
+    expect(l.deadline).toBeLessThan(9_000 + SELF);
 
-      // 송신 10초, 응답 18초(마감 15초 뒤에 도착): 되살리지 않는다 → 15초에 닫힌다
-      f.at(10_000);
-      f.state.renewDelay = 8_000;
-      await f.s.renewAll();
-      expect(l.deadline).toBe(15_000); // 연장되지 않았다
-      f.at(15_000);
-      f.s.checkDeadlines();
-      expect(closedAt).toBe(15_000);
-      expect(l.alive()).toBe(false);
-      // 닫은 시각(15초) = 마지막으로 유효했던 송신(5초) + 2T/3. 그 갱신의 DB 만료는 처리 시각(≥ 5초) + 15 = 20초 이후라 5초 이상 앞선다.
-      expect(20_000 - closedAt).toBeGreaterThanOrEqual(5_000);
-      await f.s.onModuleDestroy();
-    },
-  );
+    // 송신 10초, 응답 18초(마감 15초 뒤에 도착): 되살리지 않는다 → 15초에 닫힌다
+    f.at(10_000);
+    f.state.renewDelay = 8_000;
+    await f.s.renewAll();
+    expect(l.deadline).toBe(15_000); // 연장되지 않았다
+    f.at(15_000);
+    f.s.checkDeadlines();
+    expect(closedAt).toBe(15_000);
+    expect(l.alive()).toBe(false);
+    // 닫은 시각(15초) = 마지막으로 유효했던 송신(5초) + 2T/3. 그 갱신의 DB 만료는 처리 시각(≥ 5초) + 15 = 20초 이후라 5초 이상 앞선다.
+    expect(20_000 - closedAt).toBeGreaterThanOrEqual(5_000);
+    await f.s.onModuleDestroy();
+  });
 
   it('마감은 낮아지지 않는다: 늦게 처리된 오래된 갱신이 더 늦은 마감을 줄이지 않는다', async () => {
     const f = fixture();

@@ -158,7 +158,7 @@ describe('S3 일관성 (서로 다른 프로세스 2개, 같은 DB)', () => {
       const toUpdate = notYetSeen.slice(0, 5);
       const toDeleteUnseen = notYetSeen.slice(10, 13); // 아직 안 본 것 중 삭제 → 순회에서 0번
       const toDeleteSeen = seenInFirst.slice(0, 2); // 이미 본 것 삭제 → 이미 한 번 받았다
-      await Promise.all([
+      const writes = await Promise.all([
         ...toUpdate.map((id, i) =>
           api(
             at(i + 1),
@@ -173,6 +173,7 @@ describe('S3 일관성 (서로 다른 프로세스 2개, 같은 DB)', () => {
           api(at(i), 'DELETE', `/rooms/${r.roomId}/transactions/${id}`, r.key, undefined, idem()),
         ),
       ]);
+      expect(writes.map((w) => w.status)).toEqual(Array(writes.length).fill(200)); // 겹친 수정·삭제가 모두 성공
       const rest: string[] = [];
       let cursor = first.nextCursor;
       while (cursor) {
@@ -200,7 +201,7 @@ describe('S3 일관성 (서로 다른 프로세스 2개, 같은 DB)', () => {
 
   it(
     ac(
-      ['AC-VIEW-003-4', 'AC-VIEW-003-2'],
+      ['AC-VIEW-003-4', 'AC-VIEW-003-2', 'AC-VIEW-003-6'],
       'S3 §7',
       '동시 생성이 계속되는 동안 순회해도 시작 시점의 거래는 중복·누락 없이 나오고, 뒤늦게 커밋된 낮은 seq가 이미 지난 경계 위에 나타나지 않는다',
     ),
