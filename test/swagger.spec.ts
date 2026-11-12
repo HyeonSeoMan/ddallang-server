@@ -137,12 +137,13 @@ describe('Swagger 문서 검수 항목 (회귀 방지)', () => {
     }
   });
 
-  it('멱등 헤더는 거래 생성·수정·삭제에만 필수로 있고 다른 엔드포인트에는 없다', async () => {
+  it('멱등 헤더는 거래 생성·수정·삭제와 게임 종료에만 필수로 있고 다른 엔드포인트에는 없다', async () => {
     const d = await doc();
     const withHeaders = new Set([
       'POST /rooms/{roomId}/transactions',
       'PUT /rooms/{roomId}/transactions/{transactionId}',
       'DELETE /rooms/{roomId}/transactions/{transactionId}',
+      'POST /rooms/{roomId}/end',
     ]);
     for (const [path, item] of Object.entries<any>(d.paths)) {
       for (const [method, op] of Object.entries<any>(item)) {

@@ -140,3 +140,28 @@ export const obj = (
   properties,
 });
 export const arrayOf = (items: SchemaObject): SchemaObject => ({ type: 'array', items });
+
+export const SETTLEMENT_SCHEMA: SchemaObject = {
+  type: 'object',
+  required: ['kind', 'items'],
+  properties: {
+    kind: str('진행 중이면 EXPECTED(예상 정산), 종료 후 FINAL(최종 정산)', {
+      enum: ['EXPECTED', 'FINAL'],
+    }),
+    items: arrayOf({
+      type: 'object',
+      required: ['payerId', 'payerNickname', 'payeeId', 'payeeNickname', 'amount'],
+      properties: {
+        payerId: str('지급자 Participant ID'),
+        payerNickname: str(),
+        payeeId: str('수취자 Participant ID'),
+        payeeNickname: str(),
+        amount: {
+          type: 'integer',
+          minimum: 1,
+          description: '순손익의 합이라 단일 거래 상한을 넘을 수 있다',
+        },
+      },
+    }),
+  },
+};

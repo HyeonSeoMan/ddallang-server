@@ -20,6 +20,8 @@ export interface LookupInput {
   fingerprint: string;
   /** 방 잠금을 얻은 시점의 DB 시각(수신 시각이 아니다, S2 §3.4) */
   now: Date;
+  /** 만료 오류의 `message`(종료 요청은 방 상태를 확인하라는 안내, S4 §3.2) */
+  expiredMessage?: string;
 }
 
 export interface RecordInput extends Omit<LookupInput, 'now'> {
@@ -48,7 +50,9 @@ export class IdempotencyService {
       : input.firstAttemptAt.getTime();
     if (input.now.getTime() > effectiveFirst + IDEMPOTENCY_TTL_MS) {
       throw new ApiError('IDEMPOTENCY_KEY_EXPIRED', {
-        message: '요청 유효 기간이 지났습니다. 거래 목록에서 저장 여부를 확인해 주세요.',
+        message:
+          input.expiredMessage ??
+          '요청 유효 기간이 지났습니다. 거래 목록에서 저장 여부를 확인해 주세요.',
         details: [{ serverTime: input.now.toISOString() }],
       });
     }
