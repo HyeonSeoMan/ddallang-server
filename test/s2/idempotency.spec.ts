@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import pg from 'pg';
 import { PrismaService } from '../../src/common/db/prisma.service.js';
 import { IdempotencyService } from '../../src/idempotency/idempotency.service.js';
 import { ac, expectApiError } from '../helpers/contract.js';
@@ -538,4 +539,34 @@ describe('유효 기간과 만료 (S2 §5.4)', () => {
       'idempotent-replayed',
     );
   });
+
+  it(
+    ac(
+      ['AC-TXN-007-12'],
+      'S2 §5.4',
+      '잠금 대기 중에 유효 기간이 지나면 수신 때는 유효했더라도 만료로 거부한다(판정은 잠금을 얻은 시점의 DB 시각)',
+    ),
+    async () => {
+      const r = await setupRoom(s.http);
+      const url = new URL(s.db.databaseUrl);
+      url.searchParams.delete('schema');
+      const holder = new pg.Client({ connectionString: url.toString() });
+      await holder.connect();
+      try {
+        await holder.query('BEGIN');
+        await holder.query(`SELECT 1 FROM "Room" WHERE "id"=$1 FOR UPDATE`, [r.c.roomId]);
+        // 수신 시점에는 만료까지 약 1.5초 남은 요청
+        const idem = { key: fresh().key, at: at(-24 * HOUR + 1_500) };
+        const pending = postTx(s.http, r.c.roomId, r.c.key, validBody(r), idem).then((x) => x);
+        await new Promise((ok) => setTimeout(ok, 2_500));
+        await holder.query('COMMIT');
+        const res = await pending;
+        expectApiError(res, 409, 'IDEMPOTENCY_KEY_EXPIRED');
+        expect(await txRows(r.c.roomId)).toBe(0);
+      } finally {
+        await holder.query('ROLLBACK').catch(() => undefined);
+        await holder.end();
+      }
+    },
+  );
 });

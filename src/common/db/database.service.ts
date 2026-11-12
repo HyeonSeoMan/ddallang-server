@@ -110,6 +110,13 @@ export class DatabaseService {
   /**
    * 모든 시각 판정의 기준(PD-4). `now()`는 트랜잭션 시작 시각이라 잠금 대기 뒤의 값으로 쓰지 않는다.
    */
+  async dbNowStandalone(): Promise<Date> {
+    const rows = await this.prisma.client.$queryRaw<
+      { now: Date }[]
+    >`SELECT clock_timestamp() AS "now"`;
+    return rows[0]!.now;
+  }
+
   async dbNow(tx: DbTx): Promise<Date> {
     const rows = await tx.$queryRaw<{ now: Date }[]>`SELECT clock_timestamp() AS "now"`;
     return rows[0]!.now;

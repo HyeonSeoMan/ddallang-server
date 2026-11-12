@@ -203,7 +203,14 @@ describe('S2 동시성·경쟁 (서로 다른 프로세스 2개, 같은 DB)', ()
       const ev = events
         .filter((e) => e.roomId === r.roomId && e.transactionId === t)
         .map((e) => e.event);
-      await sleep(300);
+      await vi.waitFor(
+        () =>
+          expect(
+            events.filter((e) => e.roomId === r.roomId && e.event === 'transaction.deleted'),
+          ).not.toHaveLength(0),
+        { timeout: 10_000 },
+      );
+      await sleep(300); // 중복 발행이 없는지 보는 음성 확인(양성 도착은 위에서 기다렸다)
       const evAfter = events
         .filter((e) => e.roomId === r.roomId && e.transactionId === t)
         .map((e) => e.event);
@@ -251,7 +258,13 @@ describe('S2 동시성·경쟁 (서로 다른 프로세스 2개, 같은 DB)', ()
         .map((x) => String(x.body.transaction.amount));
       expect(winners).toContain(final!.amount);
       // 변경 이벤트 번호는 빠짐없이 증가한다
-      await sleep(400);
+      await vi.waitFor(
+        () =>
+          expect(
+            events.filter((e) => e.roomId === r.roomId && e.event === 'transaction.updated'),
+          ).toHaveLength(12),
+        { timeout: 10_000 },
+      );
       const revs = events
         .filter((e) => e.roomId === r.roomId && e.event === 'transaction.updated')
         .map((e) => e.revision as number);
@@ -317,7 +330,13 @@ describe('S2 동시성·경쟁 (서로 다른 프로세스 2개, 같은 DB)', ()
         }),
         ...Array.from({ length: 6 }, (_, i) => create(i + 1, r, { amount: 20 + i })),
       ]);
-      await sleep(500);
+      await vi.waitFor(
+        () =>
+          expect(
+            events.filter((e) => e.roomId === r.roomId && e.event === 'transaction.created'),
+          ).toHaveLength(results.filter((x) => x.status === 201).length),
+        { timeout: 10_000 },
+      );
       const evs = events.filter((e) => e.roomId === r.roomId);
       const change = evs.find((e) => e.event === 'participant.status_changed')!;
       const createdBefore = evs
