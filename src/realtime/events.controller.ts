@@ -82,7 +82,7 @@ export class EventsController {
     const holder: { stream?: SseStream } = {};
     const lease = await this.leases.acquire(
       { roomId: member.roomId, memberId: member.memberId },
-      () => holder.stream?.close(),
+      () => holder.stream?.close(true),
     );
     if (!lease.ok) {
       if (lease.reason === 'limit') {
