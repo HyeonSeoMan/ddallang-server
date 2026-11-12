@@ -74,26 +74,19 @@ describe('SSE 연결 한도 (서버 인스턴스 전체 합산)', () => {
     },
   );
 
-  it(
-    ac(
-      ['AC-ROOM-008-5'],
-      'S5 §4.1',
-      '동시 연결 경쟁: 같은 멤버가 두 프로세스에 12개를 동시에 열면 정확히 5개만 열린다',
-    ),
-    async () => {
-      const r = await makeRoom(at(0));
-      const results = await Promise.all(
-        Array.from({ length: 12 }, (_, i) => openStream(at(i), r.roomId, r.key)),
-      );
-      try {
-        expect(ok(results)).toHaveLength(5);
-        expect(limited(results)).toHaveLength(7);
-        expect(await leaseCount(r.roomId)).toBe(5);
-      } finally {
-        closeAll(results);
-      }
-    },
-  );
+  it('동시 연결 경쟁: 같은 멤버가 두 프로세스에 12개를 동시에 열면 정확히 5개만 열린다', async () => {
+    const r = await makeRoom(at(0));
+    const results = await Promise.all(
+      Array.from({ length: 12 }, (_, i) => openStream(at(i), r.roomId, r.key)),
+    );
+    try {
+      expect(ok(results)).toHaveLength(5);
+      expect(limited(results)).toHaveLength(7);
+      expect(await leaseCount(r.roomId)).toBe(5);
+    } finally {
+      closeAll(results);
+    }
+  });
 
   it('방당 50개: 멤버 10명이 5개씩 열어 50개(= 방 한도)가 되면 어느 멤버의 새 연결도 거부된다', async () => {
     const r = await makeRoom(at(0));

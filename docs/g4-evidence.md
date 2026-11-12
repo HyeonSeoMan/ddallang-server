@@ -11,7 +11,7 @@
 | `pnpm typecheck`, `pnpm lint`, `pnpm format:check`                               | 통과                                                            |
 | `pnpm deps:check`                                                                | 위반 없음(75 모듈, 252 의존)                                    |
 | `pnpm build`                                                                     | 통과                                                            |
-| `pnpm test:ac`(전체 시험 + AC 통과 확인)                                         | 52 파일, 608 시험 통과, 실패·skip 0                             |
+| `pnpm test:ac`(전체 시험 + AC 통과 확인)                                         | 52 파일, 615 시험 통과, 실패·skip 0                             |
 | `pnpm ac:check`(static) / results 모드                                           | 필수 191개 중 시험 191, 누락 0(둘 다 통과)                      |
 | `test/swagger.spec.ts`, `test/openapi-parity.spec.ts`, `test/readme-api.spec.ts` | Swagger 경로·메서드 집합 = 구현 경로(PD-19), README API 표 일치 |
 
@@ -25,14 +25,24 @@ AC가 없는 기반 Task(BE-S5-1·5·6, BE-S4-6 등)는 `ac:check --allow-empty`
 | `test/s4/concurrency.spec.ts`                                              | 종료 12개 동시(같은 키 6·다른 키 6): 전이 1회, `revision`+1, `room.ended` 1회, 성공은 전이 요청과 같은 키 재전송뿐. 종료 vs 거래 12회, 종료 vs 참여자 등록·상태 10회 |
 | `test/s5/multi-instance.spec.ts`, `limits.spec.ts`, `stream-lease.spec.ts` | 인스턴스 간 이벤트 전달, 통지 차단 뒤 하트비트 revision 복구, 100건 연속 변경, 연결 한도(RoomMember 5·방 50) 인스턴스 합산, 프로세스 종료·정지 시 임대 정리          |
 
-## 3. 지연 측정 결과(로컬 단일 호스트, 인스턴스 2개)
+## 3. 지연 측정 결과(S5 §6.7 표 그대로, 로컬 단일 호스트, 인스턴스 2개)
 
-- `[S5-4]` 이벤트 전달(거래 생성, 구독자 5명, n=300): p50 8ms, p95 12ms, 최대 22ms.
-- `[S4-7]` 변경 6종(거래 생성·수정·삭제, 참여자 등록·상태 변경, 게임 종료) 각 12회: 전달 p95 12ms/최대 15ms, 5개 조회(방·참여자·순손익·목록·정산) 완료 p95 19ms/최대 30ms.
-- 통지를 끊은 유실 시나리오: 하트비트 → 5개 조회 수렴 15.0초(기준 20초).
-- 기준(AC-VIEW-005-8): 전달·반영 p95 ≤ 1초, 최대 ≤ 3초. 서버 측은 충족.
+`test/s5/latency.spec.ts`: 방마다 접속자 10명(방장+9명)이 SSE로 연결, 변경은 한 번에 하나, T0=요청 송신 시각(보수 기준). 변경 종류별 초기 상태와 횟수는 표를 따른다(거래 생성 900→1,000건에서 100건, 수정·삭제 1,000건에서 100건씩, 상태 변경 100건, 참여자 등록·게임 종료 방 10개). 화면 반영은 5개 조회(방·참여자·순손익·목록 첫 페이지·정산) 완료까지다.
 
-**한계**: 측정 규모는 S5 §6.7 표의 초기 상태·횟수를 그대로 쓰지 않은 자체 구성이다(작은 방, 종류별 12회). 공유 CI·원격 DB·부하 상태의 수치가 아니다. 브라우저 렌더링 시간은 포함하지 않으며 AC-VIEW-005-8은 프론트엔드 Plan의 측정과 합쳐야 완료다.
+| 변경                       | 변경 수 | 전달 p95 / 최대 | 화면 반영 p95 / 최대 |
+| -------------------------- | ------- | --------------- | -------------------- |
+| transaction.created        | 100     | 8 / 13 ms       | 14 / 21 ms           |
+| transaction.updated        | 100     | 7 / 8 ms        | 12 / 13 ms           |
+| transaction.deleted        | 100     | 6 / 8 ms        | 12 / 13 ms           |
+| participant.created        | 10      | 6 / 6 ms        | 11 / 11 ms           |
+| participant.status_changed | 100     | 5 / 6 ms        | 10 / 11 ms           |
+| room.ended                 | 10      | 8 / 9 ms        | 15 / 15 ms           |
+| 전체                       | 420     | 7 / 13 ms       | 13 / 21 ms           |
+
+- 판정: 종류별·전체 모두 전달 p95 ≤ 1초·최대 ≤ 3초, 화면 반영 p95 ≤ 3초·최대 ≤ 5초(§6.7 목표) 충족(시험이 종류별로 단언).
+- 유실 시 수렴(`test/s4/realtime.spec.ts`): 통지 차단 → 하트비트 → 5개 조회 15.0초(기준 20초).
+
+**한계**: 같은 호스트·로컬 DB·왕복 지연 거의 0이라 왕복 150ms 망 조건은 재현하지 않았다. 화면 반영은 서버 측 5개 조회 완료이며 브라우저 렌더링은 포함하지 않는다(AC-VIEW-005-8은 프론트엔드 Plan의 측정과 합쳐야 완료). 공유 CI·전용 환경 수치는 아니다.
 
 ## 4. 저장 모델 의존성 이행표(Plan §7) 증거
 
@@ -50,7 +60,7 @@ AC가 없는 기반 Task(BE-S5-1·5·6, BE-S4-6 등)는 `ac:check --allow-empty`
 ## 5. 남은 위험과 실행하지 못한 검증
 
 - Codex 독립 검수: 위 범위를 제외하면 받지 않았다(최대 3회/묶음, 개발 완료 뒤 진행). 검수 지적은 미반영 상태일 수 있다.
-- S5 §6.7 표를 그대로 따른 지연 측정, 전용 환경·릴리스 전 측정, 프론트엔드 화면 반영 측정은 하지 않았다.
+- 전용 환경·릴리스 전 측정(왕복 150ms 조건 포함), 프론트엔드 화면 반영 측정은 하지 않았다.
 - 장시간 운용, 대규모 부하, 실제 배포 환경(프록시·로드밸런서의 SSE 버퍼링), 브라우저 `EventSource` 실측은 하지 않았다.
 - 전체 시험은 한 번의 로컬 실행 결과이며 반복 안정성(flaky) 측정은 하지 않았다.
-- `ddallang` 문서 PR 대기 항목(Spec 침묵 구간의 기본값 선택): BE-F1 개발 CORS 기본값 vs PD-18, `INTERNAL_ERROR`, 잘못된 JSON의 `details`, 금액 소수·범위 초과 `INVALID_VALUE`, `RequestTimeoutError` HTTP 매핑, S5 `late` 임대 → `INTERNAL_ERROR`, 하트비트 15초·갱신 T/3 기본값, 종료 요청 만료 메시지 문구, 지연 하네스 규모.
+- `ddallang` 문서 PR 대기 항목(Spec 침묵 구간의 기본값 선택): BE-F1 개발 CORS 기본값 vs PD-18, `INTERNAL_ERROR`, 잘못된 JSON의 `details`, 금액 소수·범위 초과 `INVALID_VALUE`, `RequestTimeoutError` HTTP 매핑, S5 `late` 임대 → `INTERNAL_ERROR`, 하트비트 15초·갱신 T/3 기본값, 종료 요청 만료 메시지 문구.

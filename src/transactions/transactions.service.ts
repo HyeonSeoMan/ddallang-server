@@ -267,7 +267,7 @@ export class TransactionsService {
       operation: 'DELETE',
       targetId: transactionId,
       headers,
-      input: { parseFailed: false, body: {} },
+      input: { parseFailed: false, body: {}, nonObjectJson: false, unparsedPayload: false },
       handler: async ({ tx, now }) => {
         const target = await this.loadTarget(tx, requester, transactionId); // 6·7번
         const room = await tx.room.findUniqueOrThrow({

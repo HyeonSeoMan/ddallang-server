@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { queryBalances, safeBalance } from '../common/domain/balances.js';
 import { DatabaseService } from '../common/db/database.service.js';
 import { ApiError, errorBody } from '../common/errors/api-error.js';
 import { isPlainObject } from '../common/http/fields.js';
@@ -55,11 +56,17 @@ export class SettlementService {
       headers,
       await this.db.dbNowStandalone(),
     ); // 3번(수신 시각 = DB 시각)
-    // 본문이 없는 것과 `{}`는 같은 내용이다
+    // 본문이 없는 것과 `{}`는 같고, 객체가 아닌 JSON·JSON이 아닌 본문은 서로 다른 내용이다
     const print = fingerprint({
       operation: 'END',
-      body: input.body === undefined ? {} : input.body,
-      parseFailed: input.parseFailed,
+      body: input.nonObjectJson
+        ? { $nonObjectJson: true }
+        : input.unparsedPayload
+          ? { $unparsedPayload: true }
+          : input.body === undefined
+            ? {}
+            : input.body,
+      parseFailed: input.parseFailed && !input.nonObjectJson,
     });
 
     const { value } = await this.db.withRoomMutation<Reply>(requester.roomId, async (tx) => {
@@ -108,6 +115,11 @@ export class SettlementService {
   }
 
   private validateBody(input: BodyInput): void {
+    if (input.nonObjectJson || input.unparsedPayload) {
+      throw new ApiError('VALIDATION_FAILED', {
+        details: [{ field: 'body', code: 'INVALID_TYPE' }],
+      });
+    }
     const raw = requireJsonBody(input);
     if (raw === undefined) return;
     if (!isPlainObject(raw)) {
@@ -139,23 +151,15 @@ export class SettlementService {
         where: { id: roomId },
         select: { status: true },
       });
-      const rows = await tx.$queryRaw<
-        { participantId: string; nickname: string; order: number; balance: bigint }[]
-      >`
-        SELECT p."id" AS "participantId", p."nickname", p."order",
-               COALESCE(SUM(CASE WHEN t."payeeId" = p."id" THEN t."amount" ELSE -t."amount" END), 0)::bigint AS "balance"
-        FROM "Participant" p
-        LEFT JOIN "Transaction" t
-          ON t."roomId" = p."roomId" AND t."deletedAt" IS NULL AND (t."payeeId" = p."id" OR t."payerId" = p."id")
-        WHERE p."roomId" = ${roomId}
-        GROUP BY p."id", p."nickname", p."order"`;
+      const rows = await queryBalances(tx, roomId);
       return { status: room.status, rows };
     });
-    const people = rows.map((r) => {
-      const balance = Number(r.balance);
-      if (!Number.isSafeInteger(balance)) throw new Error('balance exceeds the safe integer range');
-      return { participantId: r.participantId, nickname: r.nickname, order: r.order, balance };
-    });
+    const people = rows.map((r) => ({
+      participantId: r.participantId,
+      nickname: r.nickname,
+      order: r.order,
+      balance: r.balance,
+    }));
     const nick = new Map(people.map((p) => [p.participantId, p.nickname]));
     return {
       kind: status === 'ENDED' ? 'FINAL' : 'EXPECTED',
@@ -164,7 +168,7 @@ export class SettlementService {
         payerNickname: nick.get(i.payerId)!,
         payeeId: i.payeeId,
         payeeNickname: nick.get(i.payeeId)!,
-        amount: i.amount,
+        amount: safeBalance(i.amount),
       })),
     };
   }

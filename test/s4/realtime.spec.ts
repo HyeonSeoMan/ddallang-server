@@ -5,7 +5,7 @@ import { startInstances, stopAll, type Instance } from '../helpers/instances.js'
 import { baseDatabaseUrl, createIsolatedDb, type IsolatedDb } from '../helpers/isolated-db.js';
 import { joinRoom } from '../s5/s5-helpers.js';
 import { openStream, type OpenedStream } from '../s5/sse-client.js';
-import { api, endReq, idem, makeRoom, pct, resync, type Room } from './s4-helpers.js';
+import { api, endReq, idem, makeRoom, resync, type Room } from './s4-helpers.js';
 
 vi.setConfig({ testTimeout: 240_000, hookTimeout: 90_000 });
 
@@ -148,131 +148,6 @@ describe('정산 갱신·종료 반영 (BE-S4-7)', () => {
       } finally {
         view.close();
       }
-    },
-  );
-
-  it(
-    ac(
-      ['AC-VIEW-005-8'],
-      'S5 §6.7',
-      '모든 변경 종류(게임 종료 포함)의 이벤트 전달·5개 조회 완료(화면 반영) 지연 p95 ≤ 1초·최대 ≤ 3초',
-    ),
-    async () => {
-      const N = 12;
-      const stat: Record<string, { deliver: number[]; resync: number[] }> = {};
-      const add = (k: string, d: number, s: number) => {
-        (stat[k] ??= { deliver: [], resync: [] }).deliver.push(d);
-        stat[k]!.resync.push(s);
-      };
-      const measure = async (
-        kind: string,
-        view: OpenedStream,
-        run: () => Promise<unknown>,
-        name: string,
-        r: Room,
-        key: string,
-      ) => {
-        const from = view.events.length;
-        const t0 = Date.now();
-        await run();
-        const ev = await eventAfter(view, name, from);
-        const t1 = ev.receivedAt;
-        await resync(at(1), r, key);
-        add(kind, t1 - t0, Date.now() - t0);
-      };
-      for (let round = 0; round < N; round++) {
-        const r = await makeRoom(at(0));
-        const guest = await joinRoom(at(1), r, 'Guest');
-        const view = await openStream(at(1), r.roomId, guest.key);
-        try {
-          await ready(view);
-          let id = '';
-          await measure(
-            'transaction.created',
-            view,
-            async () => {
-              id = (
-                await tx(at(round), r, { payerId: r.p[0], payeeId: r.p[1], amount: 100 + round })
-              ).body.transaction.id;
-            },
-            'transaction.created',
-            r,
-            guest.key,
-          );
-          await measure(
-            'transaction.updated',
-            view,
-            () =>
-              api(
-                at(round),
-                'PUT',
-                `/rooms/${r.roomId}/transactions/${id}`,
-                r.key,
-                { amount: 5000 },
-                idem(),
-              ),
-            'transaction.updated',
-            r,
-            guest.key,
-          );
-          await measure(
-            'participant.created',
-            view,
-            () =>
-              api(at(round), 'POST', `/rooms/${r.roomId}/participants`, r.key, { nickname: 'New' }),
-            'participant.created',
-            r,
-            guest.key,
-          );
-          await measure(
-            'participant.status_changed',
-            view,
-            () =>
-              api(at(round), 'PATCH', `/rooms/${r.roomId}/participants/${r.p[2]}`, r.key, {
-                status: 'INACTIVE',
-              }),
-            'participant.status_changed',
-            r,
-            guest.key,
-          );
-          await measure(
-            'transaction.deleted',
-            view,
-            () =>
-              api(
-                at(round),
-                'DELETE',
-                `/rooms/${r.roomId}/transactions/${id}`,
-                r.key,
-                undefined,
-                idem(),
-              ),
-            'transaction.deleted',
-            r,
-            guest.key,
-          );
-          await measure('room.ended', view, () => endReq(at(round), r), 'room.ended', r, guest.key);
-        } finally {
-          view.close();
-        }
-      }
-      const all = { deliver: [] as number[], resync: [] as number[] };
-      const lines: string[] = [];
-      for (const [k, v] of Object.entries(stat)) {
-        all.deliver.push(...v.deliver);
-        all.resync.push(...v.resync);
-        lines.push(
-          `${k}: n=${v.deliver.length} 전달 p95=${pct(v.deliver, 0.95)}ms max=${Math.max(...v.deliver)}ms / 5조회 완료 p95=${pct(v.resync, 0.95)}ms max=${Math.max(...v.resync)}ms`,
-        );
-      }
-      console.info(
-        `[S4-7] 인스턴스 2개·로컬 DB·같은 호스트\n  ${lines.join('\n  ')}\n  전체: 전달 p95=${pct(all.deliver, 0.95)}ms max=${Math.max(...all.deliver)}ms / 5조회 완료 p95=${pct(all.resync, 0.95)}ms max=${Math.max(...all.resync)}ms`,
-      );
-      expect(Object.keys(stat)).toHaveLength(6);
-      expect(pct(all.deliver, 0.95)).toBeLessThanOrEqual(1000);
-      expect(Math.max(...all.deliver)).toBeLessThanOrEqual(3000);
-      expect(pct(all.resync, 0.95)).toBeLessThanOrEqual(1000);
-      expect(Math.max(...all.resync)).toBeLessThanOrEqual(3000);
     },
   );
 

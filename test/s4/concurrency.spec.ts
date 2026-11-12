@@ -49,6 +49,12 @@ describe('종료 동시성 (BE-S4-4, 프로세스 3개)', () => {
         expect(transitions).toHaveLength(1);
         const winnerKey = transitions[0]!.c.h.key;
         for (const v of ok) expect(v.c.h.key).toBe(winnerKey); // 성공은 전이 요청의 키뿐
+        // 전이 요청과 같은 키의 요청은 모두 성공(재전송)이어야 한다
+        const sameKey = res.filter((_, i) => calls[i]!.h.key === winnerKey);
+        for (const x of sameKey) expect(x.status).toBe(200);
+        expect(sameKey.filter((x) => x.headers.get('idempotent-replayed'))).toHaveLength(
+          sameKey.length - 1,
+        );
         for (const x of res.filter((x) => x.status !== 200)) {
           expect(x.status).toBe(409);
           expect(x.body.error.code).toBe('GAME_ENDED');
@@ -114,6 +120,7 @@ describe('종료 동시성 (BE-S4-4, 프로세스 3개)', () => {
     async () => {
       for (let round = 0; round < 10; round++) {
         const r = await makeRoom(at(0));
+        const base = await revisionOf(r.roomId);
         const [e, add, st] = await Promise.all([
           endReq(at(round), r),
           api(at(round + 1), 'POST', `/rooms/${r.roomId}/participants`, r.key, { nickname: 'Z' }),
@@ -135,6 +142,14 @@ describe('종료 동시성 (BE-S4-4, 프로세스 3개)', () => {
           ])
         )[0]!.n;
         expect(Number(n)).toBe(add.status === 201 ? 4 : 3);
+        // 상태 변경은 성공했을 때만 반영된다
+        const st0 = (
+          await q<{ status: string }>(`SELECT "status" FROM "Participant" WHERE "id"=$1`, [r.p[0]])
+        )[0]!.status;
+        expect(st0).toBe(st.status === 200 ? 'INACTIVE' : 'ACTIVE');
+        // revision은 성공한 변경 수 + 종료 1회이고, 종료 이벤트가 마지막 번호다
+        const ok = [add, st].filter((x) => x.status === 200 || x.status === 201).length;
+        expect(rev).toBe(base + ok + 1);
         await api(at(0), 'POST', `/rooms/${r.roomId}/participants`, r.key, { nickname: 'Y' });
         expect(await revisionOf(r.roomId)).toBe(rev); // 종료 뒤 반영 없음
       }

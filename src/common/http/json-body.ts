@@ -14,16 +14,32 @@ export function markBodyParseFailed(req: object): void {
   parseFailedRequests.add(req);
 }
 
+/** 파싱 실패 중 문법은 올바른 JSON이지만 최상위가 객체·배열이 아닌 본문(`5`, `"x"`, `null`). */
+const nonObjectJsonRequests = new WeakSet<object>();
+const rawBodies = new WeakMap<object, string>();
+
 /**
  * JSON 본문 파서. 실패해도 예외를 던지거나 즉시 응답하지 않고 요청에 실패만 표시한 채 `next()`로
  * 정상 흐름을 이어 간다(PD-8). 인증(401)·존재(404)·권한(403)·상태(409) 판정이 먼저 응답되어야 하고
  * 입력 검증(422)은 마지막 쪽이기 때문이다.
  */
 export function jsonBodyParser(): RequestHandler {
-  const parse = express.json();
+  const parse = express.json({
+    verify: (req, _res, buf) => {
+      rawBodies.set(req, buf.toString('utf8'));
+    },
+  });
   return (req: Request, res: Response, next: NextFunction) => {
     parse(req, res, (err?: unknown) => {
-      if (err) markBodyParseFailed(req);
+      if (err) {
+        markBodyParseFailed(req);
+        try {
+          JSON.parse(rawBodies.get(req) ?? '');
+          nonObjectJsonRequests.add(req); // 문법은 올바르다: 최상위가 객체가 아닌 JSON
+        } catch {
+          // 문법 오류
+        }
+      }
       next();
     });
   };
@@ -34,12 +50,26 @@ export interface BodyInput {
   parseFailed: boolean;
   /** 파싱된 본문(없으면 `undefined`) */
   body: unknown;
+  /** 파싱 실패 중, 문법은 올바른 JSON이지만 최상위가 객체가 아니다 */
+  nonObjectJson: boolean;
+  /** JSON이 아닌 Content-Type으로 본문 바이트가 왔다(파서가 건너뛰어 `body`가 비어 있다) */
+  unparsedPayload: boolean;
 }
 
 /** 컨트롤러 매개변수로 본문과 파싱 실패 표시를 함께 받는다. */
 export const JsonBody = createParamDecorator((_data: unknown, ctx: ExecutionContext): BodyInput => {
   const req = ctx.switchToHttp().getRequest<Request>();
-  return { parseFailed: parseFailedRequests.has(req), body: req.body as unknown };
+  const parseFailed = parseFailedRequests.has(req);
+  const length = Number(req.headers['content-length'] ?? 0);
+  return {
+    parseFailed,
+    body: req.body as unknown,
+    nonObjectJson: nonObjectJsonRequests.has(req),
+    unparsedPayload:
+      !parseFailed &&
+      req.body === undefined &&
+      (length > 0 || req.headers['transfer-encoding'] !== undefined),
+  };
 });
 
 /**
