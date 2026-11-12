@@ -19,22 +19,22 @@ DDALLANG(정산 보조 서비스) MVP의 **백엔드**입니다. NestJS(Express)
 
 ## 개발 현황 (2026-11-12, 로컬 `main`)
 
-| 묶음      | Task                                                                      | 상태 | 검수                                    |
-| --------- | ------------------------------------------------------------------------- | ---- | --------------------------------------- |
-| 공통 기반 | BE-F1 골격·설정·로깅·`/health`·Swagger                                    | 완료 | Codex 1/3 후 수정                       |
-|           | BE-F2 DB 기반·방 단위 직렬화(`withRoomLock`)                              | 완료 | Codex 3/3 소진(마지막 수정은 검수 없음) |
-|           | BE-F8 시험 기반(스키마 격리, 다중 프로세스 하네스, AC 태그 검사)          | 완료 | Codex 3/3 소진                          |
-|           | BE-F3 오류 형식·라우트 레지스트리·CORS, BE-F5 검증 라이브러리             | 완료 | 검수 없음                               |
-|           | BE-F4 신원 키 인증, BE-F7 변경 파이프라인(`revision`·`pg_notify`)         | 완료 | 검수 없음                               |
-| S1        | BE-S1-1 데이터 모델                                                       | 완료 | 검수 없음                               |
-|           | BE-S1-2~S1-7 방 생성·초대·입장·참여자·계약·동시성                         | 완료 | 자체 검수(변형 시험)                    |
-| S2        | BE-F6 멱등 기반, BE-S2-1~7 거래 생성·수정·삭제                            | 완료 | 자체 검수(변형 시험)                    |
-| S3        | BE-S3-1~4 거래 목록·누적 손익 조회                                        | 완료 | 자체 검수(변형 시험)                    |
-| S5        | BE-S5-1~6 SSE·연결 한도·지연 측정                                         | 완료 | 자체 검수 후 Codex 1/3 REVISE 반영      |
-| S4        | BE-S4-1~7 게임 종료·정산                                                  | 완료 | 검수 없음                               |
-| 마무리    | BE-Z1 통합 검증·증거 묶음([`docs/g4-evidence.md`](./docs/g4-evidence.md)) | 완료 | 검수 없음                               |
+| 묶음      | Task                                                                      | 상태 | 검수                                                 |
+| --------- | ------------------------------------------------------------------------- | ---- | ---------------------------------------------------- |
+| 공통 기반 | BE-F1 골격·설정·로깅·`/health`·Swagger                                    | 완료 | Codex 1/3 REVISE 후 수정                             |
+|           | BE-F2 DB 기반·방 단위 직렬화(`withRoomLock`)                              | 완료 | Codex 3/3 소진(마지막 수정은 검수 없음)              |
+|           | BE-F8 시험 기반(스키마 격리, 다중 프로세스 하네스, AC 태그 검사)          | 완료 | Codex 3/3 소진                                       |
+|           | BE-F3 오류 형식·라우트 레지스트리·CORS, BE-F5 검증 라이브러리             | 완료 | Codex 1/3 BLOCKED(시험 미실행)·Claude 독립 검수 PASS |
+|           | BE-F4 신원 키 인증, BE-F7 변경 파이프라인(`revision`·`pg_notify`)         | 완료 | 검수 없음                                            |
+| S1        | BE-S1-1 데이터 모델                                                       | 완료 | 검수 없음                                            |
+|           | BE-S1-2~S1-7 방 생성·초대·입장·참여자·계약·동시성                         | 완료 | Codex 2/3 PASS                                       |
+| S2        | BE-F6 멱등 기반, BE-S2-1~7 거래 생성·수정·삭제                            | 완료 | Codex 2/3 PASS                                       |
+| S3        | BE-S3-1~4 거래 목록·누적 손익 조회                                        | 완료 | Codex 1/3 REVISE 반영·Claude 독립 검수 PASS          |
+| S5        | BE-S5-1~6 SSE·연결 한도·지연 측정                                         | 완료 | Codex 3/3 소진(마지막 수정은 Claude 독립 검수 PASS)  |
+| S4        | BE-S4-1~7 게임 종료·정산                                                  | 완료 | Codex 3/3 PASS                                       |
+| 마무리    | BE-Z1 통합 검증·증거 묶음([`docs/g4-evidence.md`](./docs/g4-evidence.md)) | 완료 | 검수 없음                                            |
 
-**독립 Codex 검수는 백엔드 개발이 끝난 뒤에 받습니다**(사용자 결정 2026-11-11). 개발 중에는 짧은 자체 검수만 하며 Codex 검수·PASS로 표기하지 않습니다.
+검수 표기: **Codex**는 읽기 전용 독립 검수(묶음당 최대 3회), **Claude 독립 검수**는 Codex 한도 소진 때문에 사용자가 승인한 대체 검수(정적, 시험 미실행)이며 Codex PASS가 아닙니다. 어떤 묶음도 시험을 실행한 Codex PASS를 받지는 않았습니다(Codex 샌드박스에서 시험을 실행하지 못함). 검증 결과와 남은 위험은 [`docs/g4-evidence.md`](./docs/g4-evidence.md)에 있습니다.
 
 ### 구현된 API
 
@@ -127,9 +127,11 @@ test/          계약·동시성·제약 시험, 다중 프로세스 하네스(t
 - `REQUEST_TIMEOUT_MS`는 DB 트랜잭션 마감에만 연결되어 있고 HTTP 서버의 요청 제한과는 아직 연결되지 않았습니다(오류 코드·소유 Task 미정).
 - 배포 환경(PD-16)과 방 보관·삭제(OQ-034)는 정하지 않았습니다. 운영 배포 전에 정합니다.
 - `prisma migrate deploy` 경로와 `_prisma_migrations` 이력은 아직 검증하지 않았습니다(시험은 SQL을 직접 적용).
-- 문서에 반영할 목록(ddallang 문서 PR 예정): BE-F1 행의 "개발 기본 CORS" 문구(코드는 `CORS_ORIGINS` 필수), `INTERNAL_ERROR`(500)와 본문 JSON 파싱 실패의 `details`, 금액이 소수이면서 범위 밖일 때의 `INVALID_VALUE` 해석, `RequestTimeoutError`의 HTTP 매핑.
+- 문서에 반영할 목록(ddallang 문서 PR 예정)은 [`docs/g4-evidence.md`](./docs/g4-evidence.md) §5에 모아 두었습니다(개발 CORS 기본값, `INTERNAL_ERROR`, 잘못된 JSON·경로의 응답, 금액 `INVALID_VALUE`, `RequestTimeoutError` 매핑, 임대·하트비트 기본값, 종료 만료 메시지, 22자가 아닌 거래 ID 응답 등).
+- 시간에 의존하는 일부 시험(임대 자기 종료, `room-mutation`, S3 순회)은 시스템 부하가 클 때 간헐적으로 실패할 수 있습니다. 단독 실행에서는 통과합니다.
+- 지연 측정은 같은 호스트·로컬 DB 기준이며 왕복 150ms 조건과 브라우저 렌더링은 포함하지 않습니다.
 - 저장소 위치(`~/Documents`가 iCloud 동기화 대상일 수 있음)는 보류 중입니다.
 
 ## 계획
 
-`S5(SSE) → S4(종료·정산) → BE-Z1(통합 검증, 개발 종료 뒤 Codex 독립 검수)`. 자세한 Task 표는 `ddallang`의 `docs/plans/server/tasks.md`를 봅니다.
+백엔드 Task(BE-F1~Z1)는 모두 구현되었습니다. 남은 일은 사용자 결정입니다: Codex 한도가 풀린 뒤의 추가 검수, 문서 PR 반영, 원격 push. 자세한 Task 표는 `ddallang`의 `docs/plans/server/tasks.md`를 봅니다.
