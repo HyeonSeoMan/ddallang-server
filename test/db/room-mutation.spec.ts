@@ -1,5 +1,5 @@
 import pg from 'pg';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   DatabaseService,
   RequestTimeoutError,
@@ -136,8 +136,7 @@ describe('withRoomMutation (BE-F7, PD-3~PD-5, S5 §6.1)', () => {
     expect(eventsFor(id)).toHaveLength(0); // 아직 커밋 전
     release.resolve();
     await mutation;
-    await sleep(300);
-    expect(eventsFor(id)).toHaveLength(1);
+    await vi.waitFor(() => expect(eventsFor(id)).toHaveLength(1), { timeout: 5_000 });
   });
 
   it('통지 본문은 종류·식별자·roomId·revision·serverTime만 담는다(S5 §4.2)', async () => {
