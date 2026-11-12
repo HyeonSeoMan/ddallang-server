@@ -11,6 +11,8 @@ import { newId, newInviteCode } from '../../src/common/ids/ids.js';
 import { baseDatabaseUrl, createIsolatedDb, type IsolatedDb } from '../helpers/isolated-db.js';
 import { deferred, sleep } from '../helpers/util.js';
 
+vi.setConfig({ testTimeout: 30_000 });
+
 let db: IsolatedDb;
 let prisma: PrismaService;
 let svc: DatabaseService;
@@ -153,7 +155,7 @@ describe('withRoomMutation (BE-F7, PD-3~PD-5, S5 §6.1)', () => {
       value: 0,
       event: { event: 'room.ended' as const },
     }));
-    await sleep(300);
+    await vi.waitFor(() => expect(eventsFor(id)).toHaveLength(3), { timeout: 15_000 });
     const [a, b, c] = eventsFor(id);
     expect(a).toMatchObject({
       event: 'transaction.updated',

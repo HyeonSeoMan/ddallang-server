@@ -76,7 +76,16 @@ export class BalancesService {
         position = { createdAt: new Date(c.c), seq: c.s };
       }
     }
-    if (details.length > 0) throw new ApiError('VALIDATION_FAILED', { details });
+    if (details.length > 0) {
+      // 다른 입력 오류가 있어도 적용되는 검증(참여자 존재)은 함께 모아 알려 준다(S3 §3.3)
+      if (filter !== undefined) {
+        const exists = await this.db.readSnapshot((tx) =>
+          tx.participant.findFirst({ where: { id: filter, roomId }, select: { id: true } }),
+        );
+        if (!exists) details.push({ field: 'participantId', code: 'PARTICIPANT_NOT_FOUND' });
+      }
+      throw new ApiError('VALIDATION_FAILED', { details });
+    }
 
     return this.db.readSnapshot(async (tx) => {
       if (filter !== undefined) {

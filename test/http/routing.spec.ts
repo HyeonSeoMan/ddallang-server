@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { expectApiError } from '../helpers/contract.js';
 import { bootFixtureApp, type FixtureApp } from '../helpers/fixture-app.js';
+import { compilePattern, decodePath } from '../../src/common/routing/route-registry.js';
 import { RoomsShapeFixture } from '../fixtures/http-fixtures.js';
 
 type Method = 'get' | 'post' | 'put' | 'patch' | 'delete' | 'head';
@@ -180,5 +181,19 @@ describe('Swagger 경로와 레지스트리 (PD-19, PD-20)', () => {
         expectApiError(await call(t, 'post', path), 404, 'ROUTE_NOT_FOUND');
       }
     });
+  });
+});
+
+describe('경로 디코딩 (PD-9)', () => {
+  const pattern = compilePattern('/rooms/:roomId/transactions/:transactionId');
+  const id = 'ABCDEFGHIJKLMNOPQRSTUV'; // 22자
+  it('퍼센트 인코딩된 거래 ID도 같은 라우트로 판정한다', () => {
+    const encoded = `/rooms/r1/transactions/%41${id.slice(1)}`;
+    expect(pattern.test(encoded)).toBe(false); // 디코딩 없이는 22자 제약에 걸린다
+    expect(pattern.test(decodePath(encoded))).toBe(true);
+  });
+  it('%2F와 잘못된 인코딩은 원문을 유지한다', () => {
+    expect(decodePath('/rooms/a%2Fb/x')).toBe('/rooms/a%2Fb/x');
+    expect(decodePath('/rooms/%E0%A4%A/x')).toBe('/rooms/%E0%A4%A/x');
   });
 });

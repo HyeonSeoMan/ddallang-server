@@ -11,7 +11,7 @@
 | `pnpm typecheck`, `pnpm lint`, `pnpm format:check`                               | 통과                                                            |
 | `pnpm deps:check`                                                                | 위반 없음(75 모듈, 252 의존)                                    |
 | `pnpm build`                                                                     | 통과                                                            |
-| `pnpm test:ac`(전체 시험 + AC 통과 확인)                                         | 52 파일, 617 시험 통과, 실패·skip 0                             |
+| `pnpm test:ac`(전체 시험 + AC 통과 확인)                                         | 52 파일, 621 시험 통과, 실패·skip 0                             |
 | `pnpm ac:check`(static) / results 모드                                           | 필수 191개 중 시험 191, 누락 0(둘 다 통과)                      |
 | `test/swagger.spec.ts`, `test/openapi-parity.spec.ts`, `test/readme-api.spec.ts` | Swagger 경로·메서드 집합 = 구현 경로(PD-19), README API 표 일치 |
 
@@ -60,6 +60,8 @@ AC가 없는 기반 Task(BE-S5-1·5·6, BE-S4-6 등)는 `ac:check --allow-empty`
 | CORS `Date`·`Idempotent-Replayed` 노출          | BE-F3          | `test/http/cors.spec.ts`, `test/s2`, `test/s5`                                      |
 
 ## 5. 남은 위험과 실행하지 못한 검증
+
+- 일부 시간 의존 시험(`test/s5/stream-lease.spec.ts`의 임대 자기 종료, `test/db/room-mutation.spec.ts`)은 시스템 부하가 클 때(전체 시험 병렬 실행 중 load 약 5) 간헐적으로 실패했다. 단독 실행과 한가한 전체 실행에서는 통과한다. 반복 안정성 측정은 하지 않았다.
 
 - Codex 독립 검수: 위 범위를 제외하면 받지 않았다(최대 3회/묶음, 개발 완료 뒤 진행). 검수 지적은 미반영 상태일 수 있다.
 - 전용 환경·릴리스 전 측정(왕복 150ms 조건 포함), 프론트엔드 화면 반영 측정은 하지 않았다.

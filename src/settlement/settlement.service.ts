@@ -56,16 +56,17 @@ export class SettlementService {
       headers,
       await this.db.dbNowStandalone(),
     ); // 3번(수신 시각 = DB 시각)
-    // 본문이 없는 것과 `{}`는 같고, 객체가 아닌 JSON·JSON이 아닌 본문은 서로 다른 내용이다
+    // 본문이 없는 것과 `{}`는 같다. 객체가 아닌 JSON·JSON이 아닌 본문은 사용자가 만들 수 없는 `targetId`로
+    // 구분해(값까지 포함) 어떤 객체 본문과도 지문이 겹치지 않는다.
+    const targetId = input.nonObjectJson
+      ? `nonObjectJson:${JSON.stringify(input.nonObjectValue ?? null)}`
+      : input.unparsedPayload
+        ? `unparsedPayload:${input.unparsedSignature ?? ''}`
+        : undefined;
     const print = fingerprint({
       operation: 'END',
-      body: input.nonObjectJson
-        ? { $nonObjectJson: input.nonObjectValue ?? null }
-        : input.unparsedPayload
-          ? { $unparsedPayload: input.unparsedSignature ?? true }
-          : input.body === undefined
-            ? {}
-            : input.body,
+      targetId,
+      body: targetId ? {} : input.body === undefined ? {} : input.body,
       parseFailed: input.parseFailed && !input.nonObjectJson,
     });
 
