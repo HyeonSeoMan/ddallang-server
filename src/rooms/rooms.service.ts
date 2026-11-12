@@ -100,17 +100,24 @@ export class RoomsService {
     });
     if (existing) return { created: false, room: roomDto, me: toMemberDto(existing) };
 
-    const body = asObject(requireJsonBody(input));
-    const details: FieldDetail[] = [];
-    const nickname = strictTextField(body, 'nickname', details);
-    throwIfInvalid(details);
-
     return this.db.withRoomLock(room.id, async (tx) => {
+      // 방 상태는 잠금 안에서 다시 읽는다(응답이 커밋 시점과 같은 상태를 말하도록).
+      const locked = await tx.room.findUniqueOrThrow({
+        where: { id: room.id },
+        select: { status: true },
+      });
+      const lockedRoom = { ...roomDto, status: locked.status };
       // 같은 키의 동시 입장: 먼저 잠금을 얻은 요청이 만들었으면 나머지는 같은 RoomMember를 복원한다.
+      // 복원 판정이 검증(7번)보다 앞서므로 검증은 이 재확인 뒤에 한다(S1 §3.3, §4.3).
       const again = await tx.roomMember.findUnique({
         where: { roomId_identityKeyHash: { roomId: room.id, identityKeyHash } },
       });
-      if (again) return { created: false, room: roomDto, me: toMemberDto(again) };
+      if (again) return { created: false, room: lockedRoom, me: toMemberDto(again) };
+
+      const body = asObject(requireJsonBody(input));
+      const details: FieldDetail[] = [];
+      const nickname = strictTextField(body, 'nickname', details);
+      throwIfInvalid(details);
 
       const key = nicknameKey(nickname!);
       const taken = await tx.roomMember.findUnique({
@@ -132,7 +139,7 @@ export class RoomsService {
           identityKeyHash,
         },
       });
-      return { created: true, room: roomDto, me: toMemberDto(member) };
+      return { created: true, room: lockedRoom, me: toMemberDto(member) };
     });
   }
 

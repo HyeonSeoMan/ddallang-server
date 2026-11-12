@@ -1,7 +1,10 @@
+import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ac } from '../helpers/contract.js';
 import { startInstances, stopAll, type Instance } from '../helpers/instances.js';
 import { createIsolatedDb, type IsolatedDb } from '../helpers/isolated-db.js';
+import { hashIdentityKey } from '../../src/common/auth/identity-key.js';
+import { newId } from '../../src/common/ids/ids.js';
 import { newKey } from './s1-helpers.js';
 
 vi.setConfig({ testTimeout: 90_000, hookTimeout: 90_000 });
@@ -245,4 +248,38 @@ describe('S1 동시성·한도 (서로 다른 프로세스 2개, 같은 DB)', ()
     )[0]!.revision;
     expect(rev).toBe(12); // 등록 4 + (상태 변경 4 + 등록 4)
   });
+
+  it(
+    ac(
+      ['AC-ROOM-006-11'],
+      'S1 §3.3',
+      '같은 키로 잠금 대기 중에 다른 요청이 RoomMember를 만들면, 본문이 잘못된 입장도 검증(422)보다 복원(200)이 앞선다',
+    ),
+    async () => {
+      const r = await room();
+      const key = newKey();
+      const url = new URL(db.databaseUrl);
+      url.searchParams.delete('schema');
+      const holder = new pg.Client({ connectionString: url.toString() });
+      await holder.connect();
+      try {
+        await holder.query('BEGIN');
+        await holder.query(`SELECT 1 FROM "Room" WHERE "id"=$1 FOR UPDATE`, [r.roomId]);
+        const pending = fx(at(0), 'POST', `/invites/${r.code}/members`, key, {}); // 본문에 nickname 없음
+        await new Promise((ok) => setTimeout(ok, 500)); // 요청이 방 잠금 앞에서 기다리는 상태
+        await holder.query(
+          `INSERT INTO "RoomMember" ("id","roomId","nickname","nicknameKey","isHost","identityKeyHash")
+           VALUES ($1,$2,'Twin','twin',false,$3)`,
+          [newId(), r.roomId, hashIdentityKey(key)],
+        );
+        await holder.query('COMMIT');
+        const res = await pending;
+        expect(res.status).toBe(200);
+        expect(res.body.me.nickname).toBe('Twin');
+      } finally {
+        await holder.query('ROLLBACK').catch(() => undefined);
+        await holder.end();
+      }
+    },
+  );
 });
