@@ -35,7 +35,11 @@ export async function seedTransactions(
   const values: string[] = [];
   const params: unknown[] = [s.c.roomId, o.payer, o.payee, s.c.hostId];
   for (let n = 1; n <= o.count; n++) {
-    const id = `seed${s.c.roomId.slice(0, 6)}${first + n - 1}`;
+    // 서버의 거래 ID 형식(22자 base64url)에 맞춘다(라우트 레지스트리가 형식이 다른 ID를 404로 판정한다)
+    const id = `seed${s.c.roomId.slice(0, 6)}${String(first + n - 1).padStart(6, '0')}`.padEnd(
+      22,
+      'x',
+    );
     ids.push(id);
     const createdAt = new Date(o.sameCreatedAt ? start : start + n).toISOString();
     const deleted = o.deleteIf?.(n) ?? false;

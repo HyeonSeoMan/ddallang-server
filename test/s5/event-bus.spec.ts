@@ -146,6 +146,8 @@ describe('RoomEventBus (BE-S5-1)', () => {
     await admin.query('SELECT pg_terminate_backend($1)', [pid]);
     await createTx(inst[0]!, r, 1); // 재연결(0.5초 백오프) 전에 커밋된다 → 유실
     await createTx(inst[0]!, r, 2);
+    // 유실 구간이 실제로 있었는지 확인한다(재연결이 이미 끝났다면 이 시험은 유실을 만들지 못한 것이다)
+    expect(bus.connectCount, '재연결 전에 두 변경이 끝나야 한다').toBe(1);
     await vi.waitFor(() => expect(bus.connectCount).toBe(2), { timeout: 10_000, interval: 100 });
     await createTx(inst[0]!, r, 3);
     await vi.waitFor(() => expect(got.length).toBeGreaterThanOrEqual(1), { timeout: 5_000 });

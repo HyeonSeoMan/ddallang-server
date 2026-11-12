@@ -4,6 +4,7 @@ import type { Env } from '../common/config/env.js';
 import { ENV } from '../common/config/env.token.js';
 import { decryptCursor, encryptCursor, roomHash } from '../common/crypto/cursor.js';
 import { DatabaseService } from '../common/db/database.service.js';
+import { queryBalances, safeBalance } from '../common/domain/balances.js';
 import { toTransactionDto, type TransactionDto } from '../common/domain/dto.js';
 import { ApiError } from '../common/errors/api-error.js';
 
@@ -38,29 +39,9 @@ export class BalancesService {
         details: names.map((field) => ({ field, code: 'NOT_ALLOWED_FIELD' })),
       });
     }
-    const rows = await this.db.readSnapshot(
-      (tx) =>
-        tx.$queryRaw<
-          {
-            participantId: string;
-            nickname: string;
-            status: string;
-            order: number;
-            balance: bigint;
-          }[]
-        >`
-        SELECT p."id" AS "participantId", p."nickname", p."status", p."order",
-               COALESCE(SUM(CASE WHEN t."payeeId" = p."id" THEN t."amount" ELSE -t."amount" END), 0)::bigint AS "balance"
-        FROM "Participant" p
-        LEFT JOIN "Transaction" t
-          ON t."roomId" = p."roomId" AND t."deletedAt" IS NULL AND (t."payeeId" = p."id" OR t."payerId" = p."id")
-        WHERE p."roomId" = ${roomId}
-        GROUP BY p."id", p."nickname", p."status", p."order"
-        ORDER BY "balance" DESC, p."order" ASC`,
-    );
+    const rows = await this.db.readSnapshot((tx) => queryBalances(tx, roomId));
     return rows.map((r) => {
-      const balance = Number(r.balance);
-      if (!Number.isSafeInteger(balance)) throw new Error('balance exceeds the safe integer range');
+      const balance = safeBalance(r.balance);
       return {
         participantId: r.participantId,
         nickname: r.nickname,

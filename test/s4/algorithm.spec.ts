@@ -4,7 +4,11 @@ import { computeSettlement, type BalanceInput } from '../../src/settlement/settl
 import { ac } from '../helpers/contract.js';
 
 const people = (...b: number[]): BalanceInput[] =>
-  b.map((balance, i) => ({ participantId: 'ABCDEFGHIJ'[i]!, order: i + 1, balance }));
+  b.map((balance, i) => ({
+    participantId: 'ABCDEFGHIJ'[i]!,
+    order: i + 1,
+    balance: BigInt(balance),
+  }));
 const flat = (items: ReturnType<typeof computeSettlement>) =>
   items.map((i) => `${i.payerId}>${i.payeeId}:${i.amount}`);
 
@@ -49,16 +53,16 @@ describe('정산 알고리즘 (BE-S4-1)', () => {
 
   it(ac(['AC-SET-004-2'], 'S4 §6.3', '금액 동률은 지급자 order, 같으면 수취자 order'), () => {
     const r = computeSettlement([
-      { participantId: 'x', order: 3, balance: -50 },
-      { participantId: 'y', order: 1, balance: -50 },
-      { participantId: 'p', order: 4, balance: 50 },
-      { participantId: 'q', order: 2, balance: 50 },
+      { participantId: 'x', order: 3, balance: -50n },
+      { participantId: 'y', order: 1, balance: -50n },
+      { participantId: 'p', order: 4, balance: 50n },
+      { participantId: 'q', order: 2, balance: 50n },
     ]);
     expect(flat(r)).toEqual(['y>q:50', 'x>p:50']);
     const same = computeSettlement([
-      { participantId: 'a', order: 1, balance: -100 },
-      { participantId: 'd', order: 3, balance: 50 },
-      { participantId: 'e', order: 2, balance: 50 },
+      { participantId: 'a', order: 1, balance: -100n },
+      { participantId: 'd', order: 3, balance: 50n },
+      { participantId: 'e', order: 2, balance: 50n },
     ]);
     expect(flat(same)).toEqual(['a>e:50', 'a>d:50']);
   });
@@ -79,20 +83,20 @@ describe('정산 알고리즘 (BE-S4-1)', () => {
       fc.assert(
         fc.property(arb, fc.integer({ min: 0, max: 1000 }), (xs, seed) => {
           const input = people(...xs.slice(0, 10)).slice(0, xs.length);
-          const total = input.reduce((a, p) => a + p.balance, 0);
-          if (total !== 0) return true; // 11명 이상으로 잘린 경우는 건너뛴다
+          const total = input.reduce((a, p) => a + p.balance, 0n);
+          if (total !== 0n) return true; // 11명 이상으로 잘린 경우는 건너뛴다
           const items = computeSettlement(input);
           const bal = new Map(input.map((p) => [p.participantId, p.balance]));
           for (const i of items) {
-            expect(i.amount).toBeGreaterThanOrEqual(1);
+            expect(i.amount >= 1n).toBe(true);
             bal.set(i.payerId, bal.get(i.payerId)! + i.amount);
             bal.set(i.payeeId, bal.get(i.payeeId)! - i.amount);
           }
-          expect([...bal.values()].every((v) => v === 0)).toBe(true);
+          expect([...bal.values()].every((v) => v === 0n)).toBe(true);
           const pairs = new Set(items.map((i) => `${i.payerId}>${i.payeeId}`));
           expect(pairs.size).toBe(items.length);
-          const d = input.filter((p) => p.balance < 0).length;
-          const c = input.filter((p) => p.balance > 0).length;
+          const d = input.filter((p) => p.balance < 0n).length;
+          const c = input.filter((p) => p.balance > 0n).length;
           expect(items.length).toBeLessThanOrEqual(d && c ? d + c - 1 : 0);
           const mixed = [...input].sort(
             (a, b) => ((a.order * 7919 + seed) % 13) - ((b.order * 7919 + seed) % 13),
@@ -110,7 +114,7 @@ describe('정산 알고리즘 (BE-S4-1)', () => {
     () => {
       const big = 999_999_999 * 1000;
       const r = computeSettlement(people(-big, big));
-      expect(r).toEqual([{ payerId: 'A', payeeId: 'B', amount: big }]);
+      expect(r).toEqual([{ payerId: 'A', payeeId: 'B', amount: BigInt(big) }]);
     },
   );
 });
