@@ -163,4 +163,24 @@ describe('RoomEventBus (BE-S5-1)', () => {
     expect(await backendPids(appName)).toHaveLength(0);
     expect(bus.listening).toBe(false);
   });
+
+  it('연결 확립 직후~LISTEN 완료 전의 전송 오류가 처리되지 않은 error로 번지지 않고 재연결한다', async () => {
+    const connect = vi.spyOn(pg.Client.prototype, 'connect').mockImplementation(async function (
+      this: pg.Client,
+    ) {
+      this.emit('error', new Error('ECONNRESET during setup'));
+    } as never);
+    const query = vi.spyOn(pg.Client.prototype, 'query').mockResolvedValue(undefined as never);
+    const end = vi.spyOn(pg.Client.prototype, 'end').mockResolvedValue(undefined as never);
+    try {
+      const { bus } = newBus();
+      bus.subscribe('room-z', () => undefined);
+      await expect(bus.ready()).resolves.toBeUndefined();
+      expect(query).toHaveBeenCalled();
+    } finally {
+      connect.mockRestore();
+      query.mockRestore();
+      end.mockRestore();
+    }
+  });
 });

@@ -62,7 +62,7 @@ export class SseStream {
     if (this.closed) return;
     if (this.held) {
       this.held.push(msg);
-      if (this.held.length > this.maxPending) this.close();
+      if (this.held.length > this.maxPending) this.close(true);
       return;
     }
     this.write(msg);
@@ -71,13 +71,13 @@ export class SseStream {
   private write(msg: SseMessage): void {
     if (this.closed) return;
     if (!this.lease.alive()) {
-      this.close(); // 마감이 지난 스트림은 어떤 데이터도 받지 못한다
+      this.close(true); // 마감이 지난 스트림은 어떤 데이터도 받지 못한다
       return;
     }
     const chunk = formatSse(msg);
     if (this.blocked) {
       this.queue.push(chunk);
-      if (this.queue.length > this.maxPending) this.close();
+      if (this.queue.length > this.maxPending) this.close(true);
       return;
     }
     try {
@@ -91,7 +91,7 @@ export class SseStream {
     this.blocked = false;
     while (!this.blocked && this.queue.length > 0 && !this.closed) {
       if (!this.lease.alive()) {
-        this.close();
+        this.close(true);
         return;
       }
       try {
@@ -103,13 +103,15 @@ export class SseStream {
     }
   }
 
-  close(): void {
+  /** force이거나 쓰기가 막혀 있으면 소켓을 파기한다(end()는 막힌 소켓의 버퍼 출력을 남긴다). */
+  close(force = false): void {
     if (this.closed) return;
     this.closed = true;
     this.queue.length = 0;
     this.held = undefined;
     try {
-      this.res.end();
+      if (force || this.blocked) this.res.destroy();
+      else this.res.end();
     } catch {
       // 이미 끊긴 소켓
     }

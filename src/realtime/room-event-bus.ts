@@ -79,9 +79,16 @@ export class RoomEventBus implements OnModuleDestroy {
       connectionString: url.toString(),
       application_name: this.applicationName,
     });
+    // 연결 확립 직후~LISTEN 완료 전의 전송 오류가 처리되지 않은 'error'로 번지지 않도록 먼저 건다.
+    let setupError: Error | undefined;
+    client.on('error', (err) => {
+      if (this.client === client) return; // 확립된 뒤의 오류는 아래 lost가 처리한다
+      setupError ??= err;
+    });
     try {
       await client.connect();
       await client.query(`LISTEN ${ROOM_EVENTS_CHANNEL}`);
+      if (setupError) throw setupError;
     } catch (err) {
       await client.end().catch(() => undefined);
       this.logger.warn(`LISTEN 연결 실패: ${(err as Error).message}`);

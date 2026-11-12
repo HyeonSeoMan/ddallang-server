@@ -14,7 +14,12 @@ class FakeRes extends EventEmitter {
     this.written.push(chunk);
     return !this.blocked;
   }
+  destroyed = false;
   end(): void {
+    this.ended = true;
+  }
+  destroy(): void {
+    this.destroyed = true;
     this.ended = true;
   }
 }
@@ -114,5 +119,25 @@ describe('SseStream (PD-6)', () => {
     const { stream } = make();
     for (let i = 0; i <= MAX_PENDING_EVENTS; i++) stream.send({ event: 'e', id: i, data: {} });
     expect(stream.isClosed).toBe(true);
+  });
+
+  it('쓰기가 막힌 소켓·마감 지난 스트림은 end()가 아니라 destroy()로 닫는다(버퍼 출력 잔존 방지)', () => {
+    const a = make();
+    a.res.blocked = true;
+    a.stream.sendReady({ roomId: 'r', revision: 1, serverTime: 't' });
+    a.stream.close();
+    expect(a.res.destroyed).toBe(true);
+
+    const l = lease();
+    const b = make(l);
+    b.stream.sendReady({ roomId: 'r', revision: 1, serverTime: 't' });
+    l.setAlive(false);
+    b.stream.send({ event: 'x', id: 1, data: {} });
+    expect(b.res.destroyed).toBe(true);
+
+    const c = make();
+    c.stream.close();
+    expect(c.res.destroyed).toBe(false);
+    expect(c.res.ended).toBe(true);
   });
 });
