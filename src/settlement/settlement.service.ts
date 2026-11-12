@@ -60,9 +60,9 @@ export class SettlementService {
     const print = fingerprint({
       operation: 'END',
       body: input.nonObjectJson
-        ? { $nonObjectJson: true }
+        ? { $nonObjectJson: input.nonObjectValue ?? null }
         : input.unparsedPayload
-          ? { $unparsedPayload: true }
+          ? { $unparsedPayload: input.unparsedSignature ?? true }
           : input.body === undefined
             ? {}
             : input.body,

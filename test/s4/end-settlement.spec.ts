@@ -300,6 +300,82 @@ describe('게임 종료 (BE-S4-3)', () => {
       const k = fresh();
       expect((await end(r, r.c.key, k)).status).toBe(200);
       expectApiError(await send('text/plain', 'end', k), 409, 'IDEMPOTENCY_CONFLICT');
+      // 값이 다른 스칼라 본문은 같은 키로 다른 내용이다(거부 기록을 재생하지 않는다)
+      const r2 = await setupRoom(s.http);
+      const k2 = fresh();
+      await postTx(s.http, r2.c.roomId, r2.c.key, validBody(r2), k2);
+      expectApiError(await end(r2, r2.c.key, k2), 409, 'IDEMPOTENCY_CONFLICT');
+    },
+  );
+
+  it(
+    ac(
+      ['AC-SET-001-2'],
+      'S4 §3.3',
+      '헤더 누락은 422, 본문 검증(NOT_ALLOWED_FIELD·INVALID_TYPE)은 기록하지 않는다',
+    ),
+    async () => {
+      const r = await setupRoom(s.http);
+      expectApiError(await end(r, r.c.key, false), 422, 'VALIDATION_FAILED');
+      const bad = await end(r, r.c.key, fresh(), { force: true });
+      expectApiError(bad, 422, 'VALIDATION_FAILED', [
+        { field: 'force', code: 'NOT_ALLOWED_FIELD' },
+      ]);
+      const arr = await end(r, r.c.key, fresh(), [1]);
+      expectApiError(arr, 422, 'VALIDATION_FAILED', [{ field: 'body', code: 'INVALID_TYPE' }]);
+      expect(await records(r)).toBe(0);
+      expect(await status(r)).toBe('IN_PROGRESS');
+      expect((await end(r, r.c.key, fresh(), {})).status).toBe(200); // {}도 허용
+    },
+  );
+
+  it(
+    ac(
+      ['AC-SET-001-2'],
+      'S4 §3.3',
+      '본문: JSON이 아닌 본문·객체가 아닌 JSON은 INVALID_TYPE, 문법 오류는 INVALID_VALUE, 모두 종료하지 않고 기록하지 않는다',
+    ),
+    async () => {
+      const r = await setupRoom(s.http);
+      const send = (type: string, payload: string, k = fresh()) =>
+        s.http
+          .post(`/rooms/${r.c.roomId}/end`)
+          .set(auth(r.c.key))
+          .set('Idempotency-Key', k.key)
+          .set('Idempotency-First-Attempt-At', k.at)
+          .set('Content-Type', type)
+          .send(payload);
+      const invalidType = [{ field: 'body', code: 'INVALID_TYPE' }];
+      expectApiError(await send('text/plain', 'end'), 422, 'VALIDATION_FAILED', invalidType);
+      expectApiError(await send('application/json', '5'), 422, 'VALIDATION_FAILED', invalidType);
+      expectApiError(await send('application/json', '"x"'), 422, 'VALIDATION_FAILED', invalidType);
+      expectApiError(await send('application/json', 'null'), 422, 'VALIDATION_FAILED', invalidType);
+      expectApiError(await send('application/json', '{bad'), 422, 'VALIDATION_FAILED', [
+        { field: 'body', code: 'INVALID_VALUE' },
+      ]);
+      expect(await status(r)).toBe('IN_PROGRESS');
+      expect(await records(r)).toBe(0);
+      // 성공한 키에 JSON이 아닌 본문으로 재전송하면 재전송이 아니라 다른 내용이다
+      const k = fresh();
+      expect((await end(r, r.c.key, k)).status).toBe(200);
+      expectApiError(await send('text/plain', 'end', k), 409, 'IDEMPOTENCY_CONFLICT');
+      // 값이 다른 스칼라 본문은 같은 키로 다른 내용이다(거부 기록을 재생하지 않는다)
+      const r2 = await setupRoom(s.http);
+      await end(r2);
+      const k2 = fresh();
+      const sendTo = (v: string) =>
+        s.http
+          .post(`/rooms/${r2.c.roomId}/end`)
+          .set(auth(r2.c.key))
+          .set('Idempotency-Key', k2.key)
+          .set('Idempotency-First-Attempt-At', k2.at)
+          .set('Content-Type', 'application/json')
+          .send(v);
+      // 종료된 방: 방장의 종료 요청은 GAME_ENDED로 기록된다. 같은 키로 `{}`는 재전송, 다른 스칼라는 충돌이어야 한다
+      expectApiError(await sendTo('5'), 409, 'GAME_ENDED'); // 이 내용이 기록된다
+      expectApiError(await sendTo('5'), 409, 'GAME_ENDED'); // 같은 내용은 재전송
+      expectApiError(await sendTo('"x"'), 409, 'IDEMPOTENCY_CONFLICT'); // 다른 스칼라는 충돌
+      expectApiError(await sendTo('{}'), 409, 'IDEMPOTENCY_CONFLICT');
     },
   );
 

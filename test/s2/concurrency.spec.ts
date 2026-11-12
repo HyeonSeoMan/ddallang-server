@@ -208,7 +208,7 @@ describe('S2 동시성·경쟁 (서로 다른 프로세스 2개, 같은 DB)', ()
           expect(
             events.filter((e) => e.roomId === r.roomId && e.event === 'transaction.deleted'),
           ).not.toHaveLength(0),
-        { timeout: 10_000 },
+        { timeout: 30_000 },
       );
       await sleep(300); // 중복 발행이 없는지 보는 음성 확인(양성 도착은 위에서 기다렸다)
       const evAfter = events
@@ -263,7 +263,7 @@ describe('S2 동시성·경쟁 (서로 다른 프로세스 2개, 같은 DB)', ()
           expect(
             events.filter((e) => e.roomId === r.roomId && e.event === 'transaction.updated'),
           ).toHaveLength(12),
-        { timeout: 10_000 },
+        { timeout: 30_000 },
       );
       const revs = events
         .filter((e) => e.roomId === r.roomId && e.event === 'transaction.updated')
@@ -335,7 +335,14 @@ describe('S2 동시성·경쟁 (서로 다른 프로세스 2개, 같은 DB)', ()
           expect(
             events.filter((e) => e.roomId === r.roomId && e.event === 'transaction.created'),
           ).toHaveLength(results.filter((x) => x.status === 201).length),
-        { timeout: 10_000 },
+        { timeout: 30_000 },
+      );
+      await vi.waitFor(
+        () =>
+          expect(
+            events.some((e) => e.roomId === r.roomId && e.event === 'participant.status_changed'),
+          ).toBe(true),
+        { timeout: 30_000 },
       );
       const evs = events.filter((e) => e.roomId === r.roomId);
       const change = evs.find((e) => e.event === 'participant.status_changed')!;

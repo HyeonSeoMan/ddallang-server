@@ -173,10 +173,16 @@ describe('정산 갱신·종료 반영 (BE-S4-7)', () => {
         await admin.query('SELECT pg_terminate_backend($1)', [pid!.pid]);
         const t0 = Date.now();
         await tx(at(0), r, { payerId: r.p[0], payeeId: r.p[1], amount: 321 });
+        // 알림이 실제로 유실된 상태여야 한다: 하트비트가 오기 전에 거래 이벤트가 도착했다면 이 시험은 무효다
+        expect(
+          view.events.some((x) => x.event === 'transaction.created'),
+          '통지가 유실되어야 한다',
+        ).toBe(false);
         await view.waitFor(
           (e) => e.some((x) => x.event === 'heartbeat' && Number(x.data.revision) > seen),
           25_000,
         );
+        expect(view.events.some((x) => x.event === 'transaction.created')).toBe(false);
         const sync = await resync(at(1), r, guest.key);
         const elapsed = Date.now() - t0;
         console.info(`[S4-7] 유실 수렴(통지 차단→하트비트→5개 조회): ${elapsed}ms`);

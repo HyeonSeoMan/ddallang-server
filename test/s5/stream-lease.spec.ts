@@ -103,26 +103,19 @@ describe('임대 한도·갱신·정리 (실제 PostgreSQL, 짧은 TTL=3초)', (
     });
   });
 
-  it(
-    ac(
-      ['AC-ROOM-008-5'],
-      'S5 §4.1',
-      '인스턴스 둘이 같은 멤버의 12개 연결을 동시에 시도해도 정확히 5개만 허용된다(한도 초과 없음)',
-    ),
-    async () => {
-      const { roomId, members } = await room(1);
-      const a = svc();
-      const b = svc();
-      const results = await Promise.all(
-        Array.from({ length: 12 }, (_, i) =>
-          (i % 2 ? a : b).acquire({ roomId, memberId: members[0]! }, () => undefined),
-        ),
-      );
-      expect(results.filter((r) => r.ok)).toHaveLength(5);
-      expect(results.filter((r) => !r.ok && r.reason === 'limit')).toHaveLength(7);
-      expect(await rows(roomId)).toBe(5);
-    },
-  );
+  it('인스턴스 둘이 같은 멤버의 12개 연결을 동시에 시도해도 정확히 5개만 허용된다(한도 초과 없음)', async () => {
+    const { roomId, members } = await room(1);
+    const a = svc();
+    const b = svc();
+    const results = await Promise.all(
+      Array.from({ length: 12 }, (_, i) =>
+        (i % 2 ? a : b).acquire({ roomId, memberId: members[0]! }, () => undefined),
+      ),
+    );
+    expect(results.filter((r) => r.ok)).toHaveLength(5);
+    expect(results.filter((r) => !r.ok && r.reason === 'limit')).toHaveLength(7);
+    expect(await rows(roomId)).toBe(5);
+  });
 
   it('만료된 임대는 새 연결 판정 때 지워져 슬롯을 돌려준다(강제 종료된 인스턴스의 임대)', async () => {
     const { roomId, members } = await room(1);
