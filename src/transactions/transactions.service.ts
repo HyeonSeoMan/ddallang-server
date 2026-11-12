@@ -65,7 +65,10 @@ export class TransactionsService {
     handler: Handler;
   }): Promise<Reply> {
     const { requester, operation, targetId, input } = args;
-    const { key, firstAttemptAt } = parseIdempotencyHeaders(args.headers, new Date()); // 3번
+    const { key, firstAttemptAt } = parseIdempotencyHeaders(
+      args.headers,
+      await this.db.dbNowStandalone(),
+    ); // 3번(수신 시각 = DB 시각)
     const print = fingerprint({
       operation,
       targetId,

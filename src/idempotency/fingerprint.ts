@@ -33,7 +33,8 @@ export function normalizeBody(body: unknown, parseFailed: boolean): unknown {
   if (parseFailed) return { $unparseable: true };
   if (body === null || typeof body !== 'object' || Array.isArray(body))
     return { $nonObject: body ?? null };
-  const out: Record<string, unknown> = {};
+  // `__proto__` 같은 키도 일반 필드로 담도록 프로토타입 없는 객체를 쓴다(지문에서 사라지지 않게).
+  const out: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
   for (const [k, v] of Object.entries(body as Record<string, unknown>)) {
     out[k] = k === 'reason' || k === 'round' ? normalizeOptionalText(k, v) : v;
   }

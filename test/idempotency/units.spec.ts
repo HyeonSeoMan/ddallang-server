@@ -102,6 +102,14 @@ describe('fingerprint (S2 §5.2)', () => {
     o: Partial<{ operation: 'CREATE' | 'UPDATE' | 'DELETE'; targetId: string }> = {},
   ) => fingerprint({ ...base, ...o, body });
 
+  it('`__proto__` 필드를 더하면 지문이 달라진다(필드가 사라져 재전송으로 오인되지 않는다)', () => {
+    const plain = fp(JSON.parse('{"payerId":"a","payeeId":"b","amount":1}'));
+    const withProto = fp(
+      JSON.parse('{"payerId":"a","payeeId":"b","amount":1,"__proto__":{"x":1}}'),
+    );
+    expect(withProto).not.toBe(plain);
+  });
+
   it('SHA-256 소문자 hex 64자이고 키 순서와 무관하다', () => {
     const a = fp({ payerId: 'a', payeeId: 'b', amount: 1 });
     expect(a).toMatch(/^[0-9a-f]{64}$/);

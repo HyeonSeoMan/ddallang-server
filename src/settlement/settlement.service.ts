@@ -51,7 +51,10 @@ export class SettlementService {
     headers: Record<string, string | string[] | undefined>,
     input: BodyInput,
   ): Promise<Reply> {
-    const { key, firstAttemptAt } = parseIdempotencyHeaders(headers, new Date()); // 3번
+    const { key, firstAttemptAt } = parseIdempotencyHeaders(
+      headers,
+      await this.db.dbNowStandalone(),
+    ); // 3번(수신 시각 = DB 시각)
     // 본문이 없는 것과 `{}`는 같은 내용이다
     const print = fingerprint({
       operation: 'END',
