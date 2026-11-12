@@ -8,6 +8,7 @@ export async function startServer(
 ): Promise<NestExpressApplication> {
   const env = loadEnv(rawEnv);
   const app = await createApp(env);
+  app.enableShutdownHooks(); // 우아한 종료: 열린 SSE 스트림과 임대 정리(PD-16 e)
   await app.listen(env.PORT);
   return app;
 }

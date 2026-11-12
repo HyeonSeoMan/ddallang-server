@@ -81,6 +81,7 @@ describe('Swagger 문서 내용 (PD-19, 비권위 참고용)', () => {
         'PUT /rooms/{roomId}/transactions/{transactionId}',
         'DELETE /rooms/{roomId}/transactions/{transactionId}',
         'GET /rooms/{roomId}/balances',
+        'GET /rooms/{roomId}/events',
       ]),
     );
     for (const { path, method, op } of ops.filter((o) => o.path !== '/health')) {
@@ -92,8 +93,10 @@ describe('Swagger 문서 내용 (PD-19, 비권위 참고용)', () => {
       ).toBeTruthy();
       const success = Object.entries<any>(op.responses).filter(([code]) => code.startsWith('2'));
       expect(success.length, label).toBeGreaterThan(0);
-      for (const [, r] of success)
-        expect(r.content?.['application/json']?.schema, label).toBeDefined();
+      for (const [, r] of success) {
+        const type = path.endsWith('/events') ? 'text/event-stream' : 'application/json';
+        expect(r.content?.[type]?.schema, label).toBeDefined();
+      }
       const errors = Object.entries<any>(op.responses).filter(([code]) => !code.startsWith('2'));
       for (const [code, r] of errors)
         expect(
