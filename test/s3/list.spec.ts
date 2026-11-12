@@ -303,6 +303,16 @@ describe('페이지네이션과 필터 (S3 §4.1)', () => {
         { field: 'participantId', code: 'PARTICIPANT_NOT_FOUND' },
       ]);
       expect(foreign.body).toEqual((await list(r, '?participantId=nope')).body); // 구별되지 않는다(AC-SYS-003-8과 같은 원칙)
+      // 다른 입력 오류와 함께 있어도 존재하지 않는 참여자 오류가 빠지지 않는다
+      expectApiError(
+        await list(r, '?participantId=nope&cursor=invalid'),
+        422,
+        'VALIDATION_FAILED',
+        [
+          { field: 'cursor', code: 'INVALID_VALUE' },
+          { field: 'participantId', code: 'PARTICIPANT_NOT_FOUND' },
+        ],
+      );
     },
   );
 

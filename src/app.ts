@@ -4,7 +4,7 @@ import { Logger } from 'nestjs-pino';
 import type { DestinationStream } from 'pino';
 import { AppModule } from './app.module.js';
 import type { Env } from './common/config/env.js';
-import { corsOptions } from './common/http/cors.js';
+import { corsDelegate } from './common/http/cors.js';
 import { jsonBodyParser } from './common/http/json-body.js';
 import { RouteRegistry } from './common/routing/route-registry.js';
 import { setupSwagger } from './swagger.js';
@@ -15,7 +15,7 @@ import { setupSwagger } from './swagger.js';
  * 시험이 같은 순서로 앱을 꾸밀 수 있도록 따로 둔다.
  */
 export function configureApp(app: NestExpressApplication, env: Env): void {
-  app.enableCors(corsOptions(env));
+  app.enableCors(corsDelegate(env));
   app.use(app.get(RouteRegistry).middleware());
   app.use(jsonBodyParser());
   setupSwagger(app, env);

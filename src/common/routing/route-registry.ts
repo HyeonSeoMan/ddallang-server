@@ -56,6 +56,24 @@ export const PARAM_CONSTRAINTS: Record<string, string> = {
   transactionId: '[A-Za-z0-9_-]{22}',
 };
 
+/**
+ * Express가 매개변수에 하는 것처럼 경로 세그먼트를 퍼센트 디코딩한다(`%41` = `A`). 디코딩하면 `/`가 되는 세그먼트(`%2F`)와
+ * 잘못된 인코딩은 원문 그대로 둔다.
+ */
+export function decodePath(path: string): string {
+  return path
+    .split('/')
+    .map((seg) => {
+      try {
+        const d = decodeURIComponent(seg);
+        return d.includes('/') ? seg : d;
+      } catch {
+        return seg;
+      }
+    })
+    .join('/');
+}
+
 /** 패턴을 Express와 같은 규칙(대소문자 무시, 끝 슬래시 허용)의 정규식으로 바꾼다. */
 export function compilePattern(pattern: string): RegExp {
   const body = pattern
@@ -97,7 +115,7 @@ export class RouteRegistry {
 
   middleware(): RequestHandler {
     return (req: Request, res: Response, next: NextFunction) => {
-      const error = this.judge(req.path, req.method);
+      const error = this.judge(decodePath(req.path), req.method);
       if (!error) return next();
       for (const [name, value] of Object.entries(error.headers)) res.setHeader(name, value);
       res.status(error.status).json(error.toBody());

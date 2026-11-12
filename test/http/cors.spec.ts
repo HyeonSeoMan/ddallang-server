@@ -85,4 +85,16 @@ describe('CORS (PD-15)', () => {
     expect(nf.status).toBe(404);
     expect(nf.headers['access-control-allow-origin']).toBe(ORIGIN);
   });
+
+  it('사전 요청이 아닌 OPTIONS(Origin·Access-Control-Request-Method 없음)는 CORS가 끝내지 않고 레지스트리 판정(404·405+Allow)을 받는다', async () => {
+    const missing = await http.options('/no-such-path');
+    expect(missing.status).toBe(404);
+    expect(missing.body.error.code).toBe('ROUTE_NOT_FOUND');
+    const known = await http.options('/health'); // /health는 GET 전용
+    expect(known.status).toBe(405);
+    expect(known.headers.allow).toBe('GET');
+    const originOnly = await http.options('/health').set('Origin', ORIGIN);
+    expect(originOnly.status).toBe(405);
+    expect(originOnly.headers['access-control-allow-origin']).toBe(ORIGIN);
+  });
 });

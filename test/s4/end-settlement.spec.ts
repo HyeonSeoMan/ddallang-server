@@ -376,6 +376,9 @@ describe('게임 종료 (BE-S4-3)', () => {
       expectApiError(await sendTo('5'), 409, 'GAME_ENDED'); // 같은 내용은 재전송
       expectApiError(await sendTo('"x"'), 409, 'IDEMPOTENCY_CONFLICT'); // 다른 스칼라는 충돌
       expectApiError(await sendTo('{}'), 409, 'IDEMPOTENCY_CONFLICT');
+      // 객체 본문이 스칼라 본문의 지문을 흉내 낼 수 없다
+      expectApiError(await sendTo('{"$nonObjectJson":5}'), 409, 'IDEMPOTENCY_CONFLICT');
+      expectApiError(await sendTo('{"$nonObjectJsonScalar":[5]}'), 409, 'IDEMPOTENCY_CONFLICT');
     },
   );
 

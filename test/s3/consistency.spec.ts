@@ -116,6 +116,29 @@ afterAll(async () => {
 });
 
 describe('S3 일관성 (서로 다른 프로세스 2개, 같은 DB)', () => {
+  it('CURSOR_KEY가 바뀐 인스턴스는 이전 키로 발급된 커서를 422 INVALID_VALUE로 거부한다(키 교체)', async () => {
+    const r = await room();
+    await seed(r, 30);
+    const a = await page(at(0), r);
+    const rotated = await startInstances(1, {
+      databaseUrl: db.databaseUrl,
+      entry: 'main',
+      env: { CURSOR_KEY: Buffer.alloc(32, 9).toString('base64') },
+    });
+    try {
+      const res = await api(
+        rotated[0]!,
+        'GET',
+        `/rooms/${r.roomId}/transactions?cursor=${encodeURIComponent(a.nextCursor!)}`,
+        r.key,
+      );
+      expect(res.status).toBe(422);
+      expect(res.body.error.details).toEqual([{ field: 'cursor', code: 'INVALID_VALUE' }]);
+    } finally {
+      await stopAll(rotated);
+    }
+  });
+
   it(
     ac(
       ['AC-VIEW-003-4'],
@@ -186,13 +209,17 @@ describe('S3 일관성 (서로 다른 프로세스 2개, 같은 DB)', () => {
       const original = await seed(r, 60);
       let stop = false;
       let made = 0;
+      const failedWrites: string[] = [];
       const writer = (async () => {
         let n = 0;
         while (!stop) {
-          await Promise.all(
+          const rs = await Promise.all(
             Array.from({ length: 4 }, (_, i) => create(n + i, r, 100 + ((made + i) % 800))),
           );
-          made += 4;
+          for (const x of rs) {
+            if (x.status === 201) made++;
+            else failedWrites.push(`${x.status} ${JSON.stringify(x.body)}`);
+          }
           n += 4;
         }
       })();
@@ -217,12 +244,16 @@ describe('S3 일관성 (서로 다른 프로세스 2개, 같은 DB)', () => {
           for (const id of seen.slice(lastOriginalIdx + 1)) expect(started.has(id)).toBe(false);
           const firstOriginalIdx = seen.indexOf(original[original.length - 1]!);
           for (const id of seen.slice(0, firstOriginalIdx)) expect(started.has(id)).toBe(false);
+          // 원본 구간 안(페이지 경계 포함)에는 순회 중 생긴 거래가 한 건도 끼어들지 않는다
+          for (const id of seen.slice(firstOriginalIdx, lastOriginalIdx + 1))
+            expect(started.has(id), '원본 구간에 새 거래가 끼었다').toBe(true);
         }
       } finally {
         stop = true;
         await writer;
       }
-      expect(made).toBeGreaterThan(0);
+      expect(failedWrites).toEqual([]); // 겹친 쓰기가 모두 성공해야 이 시험이 의미가 있다
+      expect(made).toBeGreaterThan(8);
       const seqs = await q<{ seq: number; createdAt: Date }>(
         `SELECT "seq","createdAt" FROM "Transaction" WHERE "roomId"=$1 ORDER BY "seq"`,
         [r.roomId],
