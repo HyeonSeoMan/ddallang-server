@@ -11,7 +11,7 @@
 | `pnpm typecheck`, `pnpm lint`, `pnpm format:check`                               | 통과                                                            |
 | `pnpm deps:check`                                                                | 위반 없음(75 모듈, 252 의존)                                    |
 | `pnpm build`                                                                     | 통과                                                            |
-| `pnpm test:ac`(전체 시험 + AC 통과 확인)                                         | 52 파일, 621 시험 통과, 실패·skip 0                             |
+| `pnpm test:ac`(전체 시험 + AC 통과 확인)                                         | 52 파일, 622 시험 통과, 실패·skip 0                             |
 | `pnpm ac:check`(static) / results 모드                                           | 필수 191개 중 시험 191, 누락 0(둘 다 통과)                      |
 | `test/swagger.spec.ts`, `test/openapi-parity.spec.ts`, `test/readme-api.spec.ts` | Swagger 경로·메서드 집합 = 구현 경로(PD-19), README API 표 일치 |
 
@@ -61,10 +61,11 @@ AC가 없는 기반 Task(BE-S5-1·5·6, BE-S4-6 등)는 `ac:check --allow-empty`
 
 ## 5. 남은 위험과 실행하지 못한 검증
 
+- Claude 독립 검수(Codex 아님, 정적, 시험 미실행): S3·BE-F3+F5·S5 수정분 PASS(Major 이상 없음). Codex 한도 소진 때문에 사용자가 승인한 대체 검수이며 Codex PASS가 아니다.
 - 일부 시간 의존 시험(`test/s5/stream-lease.spec.ts`의 임대 자기 종료, `test/db/room-mutation.spec.ts`)은 시스템 부하가 클 때(전체 시험 병렬 실행 중 load 약 5) 간헐적으로 실패했다. 단독 실행과 한가한 전체 실행에서는 통과한다. 반복 안정성 측정은 하지 않았다.
 
 - Codex 독립 검수: 위 범위를 제외하면 받지 않았다(최대 3회/묶음, 개발 완료 뒤 진행). 검수 지적은 미반영 상태일 수 있다.
 - 전용 환경·릴리스 전 측정(왕복 150ms 조건 포함), 프론트엔드 화면 반영 측정은 하지 않았다.
 - 장시간 운용, 대규모 부하, 실제 배포 환경(프록시·로드밸런서의 SSE 버퍼링), 브라우저 `EventSource` 실측은 하지 않았다.
 - 전체 시험은 한 번의 로컬 실행 결과이며 반복 안정성(flaky) 측정은 하지 않았다.
-- `ddallang` 문서 PR 대기 항목(Spec 침묵 구간의 기본값 선택): BE-F1 개발 CORS 기본값 vs PD-18, `INTERNAL_ERROR`, 잘못된 JSON의 `details`, 금액 소수·범위 초과 `INVALID_VALUE`, `RequestTimeoutError` HTTP 매핑, S5 `late` 임대 → `INTERNAL_ERROR`, 하트비트 15초·갱신 T/3 기본값, 종료 요청 만료 메시지 문구.
+- `ddallang` 문서 PR 대기 항목(Spec 침묵 구간의 기본값 선택): BE-F1 개발 CORS 기본값 vs PD-18, `INTERNAL_ERROR`, 잘못된 JSON의 `details`, 금액 소수·범위 초과 `INVALID_VALUE`, `RequestTimeoutError` HTTP 매핑, S5 `late` 임대 → `INTERNAL_ERROR`, 하트비트 15초·갱신 T/3 기본값, 종료 요청 만료 메시지 문구, 디코딩할 수 없는 경로(`%`)의 404 `ROUTE_NOT_FOUND` 응답.

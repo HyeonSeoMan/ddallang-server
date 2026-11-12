@@ -60,6 +60,17 @@ export const PARAM_CONSTRAINTS: Record<string, string> = {
  * Express가 매개변수에 하는 것처럼 경로 세그먼트를 퍼센트 디코딩한다(`%41` = `A`). 디코딩하면 `/`가 되는 세그먼트(`%2F`)와
  * 잘못된 인코딩은 원문 그대로 둔다.
  */
+export function hasMalformedEncoding(path: string): boolean {
+  return path.split('/').some((seg) => {
+    try {
+      decodeURIComponent(seg);
+      return false;
+    } catch {
+      return true;
+    }
+  });
+}
+
 export function decodePath(path: string): string {
   return path
     .split('/')
@@ -115,7 +126,10 @@ export class RouteRegistry {
 
   middleware(): RequestHandler {
     return (req: Request, res: Response, next: NextFunction) => {
-      const error = this.judge(decodePath(req.path), req.method);
+      // 디코딩할 수 없는 경로는 어떤 라우트와도 맞지 않는다(Express가 매개변수를 디코딩하다 500이 되는 것을 막는다)
+      const error = hasMalformedEncoding(req.path)
+        ? new ApiError('ROUTE_NOT_FOUND')
+        : this.judge(decodePath(req.path), req.method);
       if (!error) return next();
       for (const [name, value] of Object.entries(error.headers)) res.setHeader(name, value);
       res.status(error.status).json(error.toBody());

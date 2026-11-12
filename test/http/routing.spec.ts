@@ -197,3 +197,15 @@ describe('경로 디코딩 (PD-9)', () => {
     expect(decodePath('/rooms/%E0%A4%A/x')).toBe('/rooms/%E0%A4%A/x');
   });
 });
+
+describe('잘못된 퍼센트 인코딩 (PD-9)', () => {
+  let t: FixtureApp;
+  beforeAll(async () => {
+    t = await bootFixtureApp([RoomsShapeFixture]);
+  });
+  afterAll(() => t?.close());
+  it('디코딩할 수 없는 경로는 500이 아니라 클라이언트 오류로 응답한다', async () => {
+    expectApiError(await t.http.get('/rooms/%E0%A4%A'), 404, 'ROUTE_NOT_FOUND');
+    expectApiError(await t.http.post('/rooms/r1/participants/%'), 404, 'ROUTE_NOT_FOUND');
+  });
+});
