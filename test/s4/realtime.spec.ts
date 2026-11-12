@@ -151,46 +151,39 @@ describe('정산 갱신·종료 반영 (BE-S4-7)', () => {
     },
   );
 
-  it(
-    ac(
-      ['AC-SYS-002-3'],
-      'S5 §6.6',
-      '알림을 의도적으로 버려도 하트비트의 revision으로 20초 안에 수렴한다(재동기화로 최신 정산)',
-    ),
-    async () => {
-      const r = await makeRoom(at(0));
-      const guest = await joinRoom(at(1), r, 'Guest');
-      const view = await openStream(at(1), r.roomId, guest.key);
-      try {
-        await ready(view);
-        const seen = Number(view.events.find((x) => x.event === 'ready')!.data.revision);
-        const [pid] = (
-          await admin.query<{ pid: number }>(
-            `SELECT pid FROM pg_stat_activity WHERE application_name=$1`,
-            [`ddallang-bus-${at(1).pid}`],
-          )
-        ).rows;
-        await admin.query('SELECT pg_terminate_backend($1)', [pid!.pid]);
-        const t0 = Date.now();
-        await tx(at(0), r, { payerId: r.p[0], payeeId: r.p[1], amount: 321 });
-        // 알림이 실제로 유실된 상태여야 한다: 하트비트가 오기 전에 거래 이벤트가 도착했다면 이 시험은 무효다
-        expect(
-          view.events.some((x) => x.event === 'transaction.created'),
-          '통지가 유실되어야 한다',
-        ).toBe(false);
-        await view.waitFor(
-          (e) => e.some((x) => x.event === 'heartbeat' && Number(x.data.revision) > seen),
-          25_000,
-        );
-        expect(view.events.some((x) => x.event === 'transaction.created')).toBe(false);
-        const sync = await resync(at(1), r, guest.key);
-        const elapsed = Date.now() - t0;
-        console.info(`[S4-7] 유실 수렴(통지 차단→하트비트→5개 조회): ${elapsed}ms`);
-        expect(total(sync.settlement)).toBe(321);
-        expect(elapsed).toBeLessThanOrEqual(20_000);
-      } finally {
-        view.close();
-      }
-    },
-  );
+  it('알림을 의도적으로 버려도 하트비트의 revision으로 20초 안에 수렴한다(재동기화로 최신 정산)', async () => {
+    const r = await makeRoom(at(0));
+    const guest = await joinRoom(at(1), r, 'Guest');
+    const view = await openStream(at(1), r.roomId, guest.key);
+    try {
+      await ready(view);
+      const seen = Number(view.events.find((x) => x.event === 'ready')!.data.revision);
+      const [pid] = (
+        await admin.query<{ pid: number }>(
+          `SELECT pid FROM pg_stat_activity WHERE application_name=$1`,
+          [`ddallang-bus-${at(1).pid}`],
+        )
+      ).rows;
+      await admin.query('SELECT pg_terminate_backend($1)', [pid!.pid]);
+      const t0 = Date.now();
+      await tx(at(0), r, { payerId: r.p[0], payeeId: r.p[1], amount: 321 });
+      // 알림이 실제로 유실된 상태여야 한다: 하트비트가 오기 전에 거래 이벤트가 도착했다면 이 시험은 무효다
+      expect(
+        view.events.some((x) => x.event === 'transaction.created'),
+        '통지가 유실되어야 한다',
+      ).toBe(false);
+      await view.waitFor(
+        (e) => e.some((x) => x.event === 'heartbeat' && Number(x.data.revision) > seen),
+        25_000,
+      );
+      expect(view.events.some((x) => x.event === 'transaction.created')).toBe(false);
+      const sync = await resync(at(1), r, guest.key);
+      const elapsed = Date.now() - t0;
+      console.info(`[S4-7] 유실 수렴(통지 차단→하트비트→5개 조회): ${elapsed}ms`);
+      expect(total(sync.settlement)).toBe(321);
+      expect(elapsed).toBeLessThanOrEqual(20_000);
+    } finally {
+      view.close();
+    }
+  });
 });

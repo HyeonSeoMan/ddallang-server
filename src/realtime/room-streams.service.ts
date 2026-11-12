@@ -36,6 +36,24 @@ export class RoomStreamsService implements OnModuleDestroy {
   }
 
   /** 스트림을 방에 붙인다. 닫히면 자동으로 떼고, 방의 마지막 스트림이면 구독과 타이머를 정리한다. */
+  /**
+   * LISTEN이 준비될 때까지 기다린다(최대 `timeoutMs`). 실패해도 던지지 않는다: 준비 전에 커밋된 변경은
+   * 뒤이어 읽는 revision과 하트비트가 메운다.
+   */
+  async whenListening(timeoutMs: number): Promise<void> {
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        this.bus.ready().catch(() => undefined),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, timeoutMs);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   attach(roomId: string, stream: SseStream): void {
     let entry = this.rooms.get(roomId);
     if (!entry) {

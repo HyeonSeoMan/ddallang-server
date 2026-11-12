@@ -110,6 +110,9 @@ export class EventsController {
     // 구독을 먼저 걸고 revision을 읽는다: ready 전에 도착한 이벤트는 붙잡아 두었다가 ready 뒤에 보낸다.
     this.streams.attach(member.roomId, stream);
     try {
+      // LISTEN이 준비된 뒤에 revision을 읽어, 첫 구독·재연결 틈에 커밋된 변경이 ready 이후 이벤트로도 하트비트로도
+      // 빠지지 않게 한다(준비가 늦으면 최대 2초만 기다리고 하트비트에 맡긴다).
+      await this.streams.whenListening(2_000);
       const room = await this.prisma.client.room.findUniqueOrThrow({
         where: { id: member.roomId },
         select: { revision: true },
