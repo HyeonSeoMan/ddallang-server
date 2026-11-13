@@ -34,7 +34,7 @@ DDALLANG(정산 보조 서비스) MVP의 **백엔드**입니다. NestJS(Express)
 | S4        | BE-S4-1~7 게임 종료·정산                                                  | 완료 | Codex 3/3 PASS                                       |
 | 마무리    | BE-Z1 통합 검증·증거 묶음([`docs/g4-evidence.md`](./docs/g4-evidence.md)) | 완료 | 검수 없음                                            |
 
-검수 표기: **Codex**는 읽기 전용 독립 검수(묶음당 최대 3회), **Claude 독립 검수**는 Codex 한도 소진 때문에 사용자가 승인한 대체 검수(정적, 시험 미실행)이며 Codex PASS가 아닙니다. 어떤 묶음도 시험을 실행한 Codex PASS를 받지는 않았습니다(Codex 샌드박스에서 시험을 실행하지 못함). 검증 결과와 남은 위험은 [`docs/g4-evidence.md`](./docs/g4-evidence.md)에 있습니다.
+검수 표기: **Codex**는 읽기 전용 독립 검수(묶음당 최대 3회), **Claude 독립 검수**는 Codex 한도 소진 때문에 사용자가 승인한 대체 검수(정적, 시험 미실행)이며 Codex PASS가 아닙니다. 어떤 묶음도 시험을 실행한 Codex PASS를 받지는 않았습니다(Codex 샌드박스에서 시험을 실행하지 못함). 검증 결과와 남은 위험은 [`docs/g4-evidence.md`](./docs/g4-evidence.md)에 있습니다. 프론트엔드 연동 가이드(API 계약 요약, 인증·멱등·SSE·재동기화 규칙)는 [`docs/frontend-handoff.md`](./docs/frontend-handoff.md)에 있습니다.
 
 ### 구현된 API
 
