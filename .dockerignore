@@ -1,0 +1,15 @@
+node_modules
+dist
+dist-test
+coverage
+.git
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+.ac-results.json
+src/generated
+test
+docs
+scripts

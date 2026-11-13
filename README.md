@@ -125,7 +125,7 @@ test/          계약·동시성·제약 시험, 다중 프로세스 하네스(t
 
 - 멱등 기록 정리(`expiresAt + 1시간` 이후 삭제)는 10분 주기 작업이며 `test` 환경에서는 돌지 않습니다.
 - `REQUEST_TIMEOUT_MS`는 DB 트랜잭션 마감에만 연결되어 있고 HTTP 서버의 요청 제한과는 아직 연결되지 않았습니다(오류 코드·소유 Task 미정).
-- 배포 환경(PD-16)과 방 보관·삭제(OQ-034)는 정하지 않았습니다. 운영 배포 전에 정합니다.
+- 배포 환경(PD-16)과 방 보관·삭제(OQ-034)는 정하지 않았습니다. 운영 배포 전에 정합니다. 포트폴리오·시연용 무료 클라우드 배포 안내(Dockerfile 포함, 로컬에서 빌드·실행해 보지 않음)는 [`docs/deploy-free.md`](./docs/deploy-free.md)에 있습니다.
 - `prisma migrate deploy` 경로와 `_prisma_migrations` 이력은 아직 검증하지 않았습니다(시험은 SQL을 직접 적용).
 - 문서에 반영할 목록(ddallang 문서 PR 예정)은 [`docs/g4-evidence.md`](./docs/g4-evidence.md) §5에 모아 두었습니다(개발 CORS 기본값, `INTERNAL_ERROR`, 잘못된 JSON·경로의 응답, 금액 `INVALID_VALUE`, `RequestTimeoutError` 매핑, 임대·하트비트 기본값, 종료 만료 메시지, 22자가 아닌 거래 ID 응답 등).
 - 시간에 의존하는 일부 시험(임대 자기 종료, `room-mutation`, S3 순회)은 시스템 부하가 클 때 간헐적으로 실패할 수 있습니다. 단독 실행에서는 통과합니다.
