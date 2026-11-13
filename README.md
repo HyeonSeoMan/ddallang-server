@@ -17,7 +17,7 @@ DDALLANG(정산 보조 서비스) MVP의 **백엔드**입니다. NestJS(Express)
 | S5 실시간·연결           | v0.2.3                               |
 | S4 정산·종료             | v0.2.0                               |
 
-## 개발 현황 (2026-11-12, 로컬 `main`)
+## 개발 현황 (2026-11-13)
 
 | 묶음      | Task                                                                      | 상태 | 검수                                                 |
 | --------- | ------------------------------------------------------------------------- | ---- | ---------------------------------------------------- |
@@ -35,6 +35,19 @@ DDALLANG(정산 보조 서비스) MVP의 **백엔드**입니다. NestJS(Express)
 | 마무리    | BE-Z1 통합 검증·증거 묶음([`docs/g4-evidence.md`](./docs/g4-evidence.md)) | 완료 | 검수 없음                                            |
 
 검수 표기: **Codex**는 읽기 전용 독립 검수(묶음당 최대 3회), **Claude 독립 검수**는 Codex 한도 소진 때문에 사용자가 승인한 대체 검수(정적, 시험 미실행)이며 Codex PASS가 아닙니다. 어떤 묶음도 시험을 실행한 Codex PASS를 받지는 않았습니다(Codex 샌드박스에서 시험을 실행하지 못함). 검증 결과와 남은 위험은 [`docs/g4-evidence.md`](./docs/g4-evidence.md)에 있습니다. 프론트엔드 연동 가이드(API 계약 요약, 인증·멱등·SSE·재동기화 규칙)는 [`docs/frontend-handoff.md`](./docs/frontend-handoff.md)에 있습니다.
+
+### 배포 (포트폴리오·시연용)
+
+| 항목           | 내용                                                                                              |
+| -------------- | ------------------------------------------------------------------------------------------------- |
+| API            | Render 무료 웹 서비스(Docker, 싱가포르): `https://ddallang-api.onrender.com` (`GET /health`)      |
+| DB             | Supabase 무료 PostgreSQL(Session pooler 5432, `sslmode=require`)                                  |
+| 허용 출처      | `CORS_ORIGINS` 환경변수(현재 `http://localhost:3000`). 프론트를 배포하면 Render에서 바꾸고 재배포 |
+| 마이그레이션   | 컨테이너 시작 때 `prisma migrate deploy`로 자동 적용                                              |
+| 무료 플랜 특성 | 15분 유휴 후 잠들고 첫 요청이 50초 이상 걸릴 수 있음. 잠들면 SSE가 끊김(프론트가 재연결·재동기화) |
+| 비밀값         | `DATABASE_URL`, `CURSOR_KEY`는 Render 환경변수에만 둠(저장소에 없음)                              |
+
+로컬 컨테이너 점검(빌드, 마이그레이션 6건, 기본 흐름, SSE, 종료 신호 처리)은 통과했습니다. Render·Supabase 환경의 SSE 프록시 경유 동작은 프론트에서 처음 붙일 때 확인해야 합니다. 방법과 막히는 곳은 [`docs/deploy-free.md`](./docs/deploy-free.md)에 있습니다. 운영(실사용자) 배포 기준은 아직 정하지 않았습니다(PD-16).
 
 ### 구현된 API
 
@@ -125,7 +138,7 @@ test/          계약·동시성·제약 시험, 다중 프로세스 하네스(t
 
 - 멱등 기록 정리(`expiresAt + 1시간` 이후 삭제)는 10분 주기 작업이며 `test` 환경에서는 돌지 않습니다.
 - `REQUEST_TIMEOUT_MS`는 DB 트랜잭션 마감에만 연결되어 있고 HTTP 서버의 요청 제한과는 아직 연결되지 않았습니다(오류 코드·소유 Task 미정).
-- 배포 환경(PD-16)과 방 보관·삭제(OQ-034)는 정하지 않았습니다. 운영 배포 전에 정합니다. 포트폴리오·시연용 무료 클라우드 배포 안내(Dockerfile 포함, 로컬에서 빌드·실행해 보지 않음)는 [`docs/deploy-free.md`](./docs/deploy-free.md)에 있습니다.
+- 운영(실사용자) 배포 환경(PD-16)과 방 보관·삭제(OQ-034)는 정하지 않았습니다. 현재 배포는 무료 플랜 시연용입니다([`docs/deploy-free.md`](./docs/deploy-free.md)).
 - `prisma migrate deploy` 경로와 `_prisma_migrations` 이력은 아직 검증하지 않았습니다(시험은 SQL을 직접 적용).
 - 문서에 반영할 목록(ddallang 문서 PR 예정)은 [`docs/g4-evidence.md`](./docs/g4-evidence.md) §5에 모아 두었습니다(개발 CORS 기본값, `INTERNAL_ERROR`, 잘못된 JSON·경로의 응답, 금액 `INVALID_VALUE`, `RequestTimeoutError` 매핑, 임대·하트비트 기본값, 종료 만료 메시지, 22자가 아닌 거래 ID 응답 등).
 - 시간에 의존하는 일부 시험(임대 자기 종료, `room-mutation`, S3 순회)은 시스템 부하가 클 때 간헐적으로 실패할 수 있습니다. 단독 실행에서는 통과합니다.
@@ -134,4 +147,4 @@ test/          계약·동시성·제약 시험, 다중 프로세스 하네스(t
 
 ## 계획
 
-백엔드 Task(BE-F1~Z1)는 모두 구현되었습니다. 남은 일은 사용자 결정입니다: Codex 한도가 풀린 뒤의 추가 검수, 문서 PR 반영, 원격 push. 자세한 Task 표는 `ddallang`의 `docs/plans/server/tasks.md`를 봅니다.
+백엔드 Task(BE-F1~Z1)는 모두 구현·배포되었습니다. 남은 일은 프론트엔드 연동과 사용자 결정입니다: 프론트 배포 후 `CORS_ORIGINS` 갱신, Render·Supabase 환경의 SSE 확인, Codex 한도가 풀린 뒤의 추가 검수, 문서 PR 반영. 프론트엔드 작업자(사람·AI)는 [`docs/frontend-handoff.md`](./docs/frontend-handoff.md)를 먼저 읽습니다. 자세한 Task 표는 `ddallang`의 `docs/plans/server/tasks.md`를 봅니다.
