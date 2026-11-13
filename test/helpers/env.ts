@@ -11,6 +11,7 @@ export function testEnv(nodeEnv: Env['NODE_ENV'] = 'test'): Env {
     DB_STATEMENT_TIMEOUT_MS: 10_000,
     REQUEST_TIMEOUT_MS: 30_000,
     DB_POOL_MAX: 10,
+    DB_SSL_REJECT_UNAUTHORIZED: true,
   };
 }
 

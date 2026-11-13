@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ROOM_EVENTS_CHANNEL } from '../../src/common/db/database.service.js';
 import { ac, expectApiError } from '../helpers/contract.js';
 import { baseDatabaseUrl } from '../helpers/isolated-db.js';
-import { sleep } from '../helpers/util.js';
+import { parseNotification, sleep } from '../helpers/util.js';
 import {
   addParticipant,
   auth,
@@ -25,7 +25,10 @@ beforeAll(async () => {
   listener = new pg.Client({ connectionString: baseDatabaseUrl() });
   await listener.connect();
   await listener.query(`LISTEN ${ROOM_EVENTS_CHANNEL}`);
-  listener.on('notification', (m) => m.payload && events.push(JSON.parse(m.payload)));
+  listener.on('notification', (m) => {
+    const e = parseNotification(m.payload);
+    if (e) events.push(e);
+  });
 });
 afterAll(async () => {
   await listener?.end();

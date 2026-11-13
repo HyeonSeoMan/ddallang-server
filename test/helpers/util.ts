@@ -25,3 +25,18 @@ export function deferred<T = void>() {
 }
 
 export const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/**
+ * 시험의 LISTEN 리스너용: 통지 채널은 데이터베이스 전체가 공유하므로 다른 시험이 일부러 보낸 형식이 틀린
+ * 통지(`not json`)가 섞일 수 있다. 해석할 수 없으면 `undefined`로 버린다.
+ */
+export function parseNotification<T = Record<string, unknown>>(
+  payload: string | undefined,
+): T | undefined {
+  if (!payload) return undefined;
+  try {
+    return JSON.parse(payload) as T;
+  } catch {
+    return undefined;
+  }
+}

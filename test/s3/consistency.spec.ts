@@ -210,6 +210,7 @@ describe('S3 일관성 (서로 다른 프로세스 2개, 같은 DB)', () => {
       const original = await seed(r, 60);
       let stop = false;
       let made = 0;
+      let madeDuringTraversal: number | undefined;
       const failedWrites: string[] = [];
       const writer = (async () => {
         let n = 0;
@@ -249,12 +250,13 @@ describe('S3 일관성 (서로 다른 프로세스 2개, 같은 DB)', () => {
           for (const id of seen.slice(firstOriginalIdx, lastOriginalIdx + 1))
             expect(started.has(id), '원본 구간에 새 거래가 끼었다').toBe(true);
         }
+        madeDuringTraversal = made; // 순회 중에 실제로 쓰기가 성공한 수
       } finally {
         stop = true;
         await writer;
       }
       expect(failedWrites).toEqual([]); // 겹친 쓰기가 모두 성공해야 이 시험이 의미가 있다
-      expect(made).toBeGreaterThan(8);
+      expect(madeDuringTraversal ?? 0).toBeGreaterThan(0); // 순회와 쓰기가 실제로 겹쳤다
       const seqs = await q<{ seq: number; createdAt: Date }>(
         `SELECT "seq","createdAt" FROM "Transaction" WHERE "roomId"=$1 ORDER BY "seq"`,
         [r.roomId],

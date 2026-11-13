@@ -34,6 +34,8 @@
 | `CORS_ORIGINS` | 프론트 주소(쉼표로 여러 개 가능). 예: `https://내프론트.example` (스킴·포트까지 정확히, 끝에 `/` 없이)                                                                                                          |
 | `CURSOR_KEY`   | 32바이트 난수를 base64로 만든 값. 내 터미널에서 `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`를 실행해 나온 값을 시크릿에 바로 붙여 넣는다. 바꾸면 이전 커서가 모두 무효가 된다 |
 
+**Supabase 등 자체 CA를 쓰는 DB는 `DB_SSL_REJECT_UNAUTHORIZED=false`도 함께 넣는다.** `pg`는 `sslmode=require`를 인증서 검증으로 해석해서, 이 값이 없으면 마이그레이션은 통과해도 실행 중 모든 DB 요청이 `self-signed certificate in certificate chain`(500)으로 실패한다. `false`는 연결을 암호화하지만 서버 인증서는 검증하지 않는다(포트폴리오·시연 용도의 절충). 검증하려면 대신 DB 제공자가 주는 CA 인증서(PEM)를 `DB_SSL_CA`에 넣는다(줄바꿈은 실제 개행 또는 `\n`).
+
 선택(기본값이 있다): `DB_LOCK_TIMEOUT_MS`(5000), `DB_STATEMENT_TIMEOUT_MS`(10000), `REQUEST_TIMEOUT_MS`(30000), `DB_POOL_MAX`(10). 무료 DB의 연결 한도가 작으면 `DB_POOL_MAX`를 3~5로 낮춘다. 절전에서 깨어난 DB가 느리면 세 시간 제한을 함께 늘리되 `LOCK < STATEMENT < REQUEST < 3600000`을 지킨다.
 
 ## 3단계: 앱 배포(Render 기준)

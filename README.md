@@ -83,7 +83,7 @@ docker compose up -d         # PostgreSQL 16
 pnpm build && pnpm start     # 또는 개발 중: pnpm build 후 NODE_ENV=development node dist/main.js
 ```
 
-환경 변수는 시작할 때 검증하며 누락되면 기동하지 않습니다(`.env.example` 참고): `NODE_ENV`(`development`|`test`|`production`), `PORT`(기본 3001), `CORS_ORIGINS`, `DATABASE_URL`, `CURSOR_KEY`(커서 AEAD 키, base64 32바이트), `DB_LOCK_TIMEOUT_MS`(5000), `DB_STATEMENT_TIMEOUT_MS`(10000), `REQUEST_TIMEOUT_MS`(30000), `DB_POOL_MAX`(10). 시간 제한은 `lock < statement < request < 1시간`이어야 합니다.
+환경 변수는 시작할 때 검증하며 누락되면 기동하지 않습니다(`.env.example` 참고): `NODE_ENV`(`development`|`test`|`production`), `PORT`(기본 3001), `CORS_ORIGINS`, `DATABASE_URL`, `CURSOR_KEY`(커서 AEAD 키, base64 32바이트), `DB_LOCK_TIMEOUT_MS`(5000), `DB_STATEMENT_TIMEOUT_MS`(10000), `REQUEST_TIMEOUT_MS`(30000), `DB_POOL_MAX`(10), `DB_SSL_REJECT_UNAUTHORIZED`(기본 true, 자체 CA를 쓰는 DB는 false 또는 `DB_SSL_CA`). 시간 제한은 `lock < statement < request < 1시간`이어야 합니다.
 
 마이그레이션은 `prisma/migrations/*/migration.sql`(CHECK 제약·부분 인덱스 포함)이며 `pnpm exec prisma migrate deploy`로 적용합니다. `migrate reset`과 `--accept-data-loss`는 쓰지 않습니다.
 
@@ -141,7 +141,7 @@ test/          계약·동시성·제약 시험, 다중 프로세스 하네스(t
 - 운영(실사용자) 배포 환경(PD-16)과 방 보관·삭제(OQ-034)는 정하지 않았습니다. 현재 배포는 무료 플랜 시연용입니다([`docs/deploy-free.md`](./docs/deploy-free.md)).
 - `prisma migrate deploy` 경로와 `_prisma_migrations` 이력은 아직 검증하지 않았습니다(시험은 SQL을 직접 적용).
 - 문서에 반영할 목록(ddallang 문서 PR 예정)은 [`docs/g4-evidence.md`](./docs/g4-evidence.md) §5에 모아 두었습니다(개발 CORS 기본값, `INTERNAL_ERROR`, 잘못된 JSON·경로의 응답, 금액 `INVALID_VALUE`, `RequestTimeoutError` 매핑, 임대·하트비트 기본값, 종료 만료 메시지, 22자가 아닌 거래 ID 응답 등).
-- 시간에 의존하는 일부 시험(임대 자기 종료, `room-mutation`, S3 순회)은 시스템 부하가 클 때 간헐적으로 실패할 수 있습니다. 단독 실행에서는 통과합니다.
+- 시간 의존 시험이 간헐적으로 실패하던 원인(시험 간 공유 채널의 형식이 틀린 통지)은 고쳤고, 전체 시험은 연속 두 번 통과했습니다. 반복 안정성 통계는 없습니다.
 - 지연 측정은 같은 호스트·로컬 DB 기준이며 왕복 150ms 조건과 브라우저 렌더링은 포함하지 않습니다.
 - 저장소 위치(`~/Documents`가 iCloud 동기화 대상일 수 있음)는 보류 중입니다.
 

@@ -3,6 +3,7 @@ import pg from 'pg';
 import type { Env } from '../common/config/env.js';
 import { ENV } from '../common/config/env.token.js';
 import { ROOM_EVENTS_CHANNEL } from '../common/db/database.service.js';
+import { pgConnectionConfig, type PgSslEnv } from '../common/db/pg-config.js';
 
 /** `pg_notify('room_events', …)`의 본문(식별자와 종류만, S5 §4.2). */
 export interface RoomEventPayload {
@@ -37,7 +38,7 @@ export class RoomEventBus implements OnModuleDestroy {
   connectCount = 0;
 
   constructor(
-    @Inject(ENV) private readonly env: Pick<Env, 'DATABASE_URL'>,
+    @Inject(ENV) private readonly env: Pick<Env, 'DATABASE_URL'> & PgSslEnv,
     /** 진단용 연결 이름(pg_stat_activity). 기본은 프로세스별로 구분된다. */
     private readonly applicationName = `ddallang-bus-${process.pid}`,
   ) {}
@@ -73,10 +74,11 @@ export class RoomEventBus implements OnModuleDestroy {
   }
 
   private async connect(): Promise<void> {
-    const url = new URL(this.env.DATABASE_URL);
-    url.searchParams.delete('schema'); // Prisma 전용 매개변수는 pg에 넘기지 않는다
+    // Prisma 전용 `schema`는 빼고, TLS 설정은 풀과 같은 규칙으로 만든다.
+    const { connectionString, ssl } = pgConnectionConfig(this.env);
     const client = new pg.Client({
-      connectionString: url.toString(),
+      connectionString,
+      ...(ssl ? { ssl } : {}),
       application_name: this.applicationName,
     });
     // 연결 확립 직후~LISTEN 완료 전의 전송 오류가 처리되지 않은 'error'로 번지지 않도록 먼저 건다.
