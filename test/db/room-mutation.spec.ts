@@ -9,7 +9,7 @@ import {
 import { PrismaService } from '../../src/common/db/prisma.service.js';
 import { newId, newInviteCode } from '../../src/common/ids/ids.js';
 import { baseDatabaseUrl, createIsolatedDb, type IsolatedDb } from '../helpers/isolated-db.js';
-import { deferred, sleep } from '../helpers/util.js';
+import { deferred, parseNotification, sleep } from '../helpers/util.js';
 
 vi.setConfig({ testTimeout: 30_000 });
 
@@ -32,7 +32,8 @@ beforeAll(async () => {
   await listener.connect();
   await listener.query(`LISTEN ${ROOM_EVENTS_CHANNEL}`);
   listener.on('notification', (m) => {
-    if (m.channel === ROOM_EVENTS_CHANNEL && m.payload) received.push(JSON.parse(m.payload));
+    const e = m.channel === ROOM_EVENTS_CHANNEL ? parseNotification(m.payload) : undefined;
+    if (e) received.push(e as (typeof received)[number]);
   });
 });
 afterAll(async () => {

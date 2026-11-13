@@ -19,6 +19,10 @@ const rawSchema = z.object({
   DB_STATEMENT_TIMEOUT_MS: positiveInt(10_000),
   REQUEST_TIMEOUT_MS: positiveInt(30_000),
   DB_POOL_MAX: positiveInt(10),
+  /** `sslmode=require` 연결에서 서버 인증서를 검증할지. Supabase처럼 자체 CA를 쓰는 DB는 `false`(암호화만) 또는 `DB_SSL_CA`를 쓴다. */
+  DB_SSL_REJECT_UNAUTHORIZED: z.enum(['true', 'false']).default('true'),
+  /** 서버 인증서를 검증할 CA(PEM). 줄바꿈은 실제 개행 또는 `\n` 문자열 둘 다 받는다. */
+  DB_SSL_CA: z.string().min(1).optional(),
 });
 
 export type Env = {
@@ -33,6 +37,8 @@ export type Env = {
   /** BE-F2에서는 Prisma 트랜잭션 제한 시간으로만 쓴다. 서버의 요청 제한에는 아직 연결되지 않았다. */
   REQUEST_TIMEOUT_MS: number;
   DB_POOL_MAX: number;
+  DB_SSL_REJECT_UNAUTHORIZED: boolean;
+  DB_SSL_CA?: string;
 };
 
 export class EnvValidationError extends Error {
@@ -67,5 +73,12 @@ export function loadEnv(raw: Record<string, string | undefined>): Env {
   if (cursorKey.length !== 32) {
     throw new EnvValidationError(['CURSOR_KEY: base64로 인코딩한 32바이트여야 한다']);
   }
-  return { ...rest, CURSOR_KEY: cursorKey, CORS_ORIGINS: listed };
+  const { DB_SSL_REJECT_UNAUTHORIZED, DB_SSL_CA, ...others } = rest;
+  return {
+    ...others,
+    DB_SSL_REJECT_UNAUTHORIZED: DB_SSL_REJECT_UNAUTHORIZED === 'true',
+    ...(DB_SSL_CA ? { DB_SSL_CA: DB_SSL_CA.replace(/\\n/g, '\n') } : {}),
+    CURSOR_KEY: cursorKey,
+    CORS_ORIGINS: listed,
+  };
 }

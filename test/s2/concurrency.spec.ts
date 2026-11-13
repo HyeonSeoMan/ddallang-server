@@ -5,7 +5,7 @@ import { ROOM_EVENTS_CHANNEL } from '../../src/common/db/database.service.js';
 import { ac } from '../helpers/contract.js';
 import { startInstances, stopAll, type Instance } from '../helpers/instances.js';
 import { baseDatabaseUrl, createIsolatedDb, type IsolatedDb } from '../helpers/isolated-db.js';
-import { sleep } from '../helpers/util.js';
+import { parseNotification, sleep } from '../helpers/util.js';
 import { newKey } from '../s1/s1-helpers.js';
 
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 90_000 });
@@ -107,7 +107,10 @@ beforeAll(async () => {
   listener = new pg.Client({ connectionString: baseDatabaseUrl() });
   await listener.connect();
   await listener.query(`LISTEN ${ROOM_EVENTS_CHANNEL}`);
-  listener.on('notification', (m) => m.payload && events.push(JSON.parse(m.payload) as Body));
+  listener.on('notification', (m) => {
+    const e = parseNotification<Body>(m.payload);
+    if (e) events.push(e);
+  });
 });
 afterAll(async () => {
   await listener?.end();
