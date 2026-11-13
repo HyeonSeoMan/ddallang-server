@@ -20,4 +20,5 @@ COPY --from=build /app/prisma ./prisma
 COPY --from=build /app/prisma.config.ts /app/package.json ./
 # NODE_ENV, DATABASE_URL, CURSOR_KEY, CORS_ORIGINS 등은 호스팅의 환경변수로 넣는다(이미지에 넣지 않는다).
 EXPOSE 3001
-CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy && node dist/main.js"]
+# exec로 서버가 PID 1이 되어 SIGTERM을 직접 받는다(우아한 종료).
+CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy && exec node dist/main.js"]
