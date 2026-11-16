@@ -170,7 +170,7 @@ test/          계약·동시성·제약 시험, 다중 프로세스 하네스(t
 - 멱등 기록 정리(`expiresAt + 1시간` 이후 삭제)는 10분 주기 작업이며 `test` 환경에서는 돌지 않습니다.
 - `REQUEST_TIMEOUT_MS`는 DB 트랜잭션 마감에만 연결되어 있고 HTTP 서버의 요청 제한과는 아직 연결되지 않았습니다(오류 코드·소유 Task 미정).
 - 운영(실사용자) 배포 환경(PD-16)과 방 보관·삭제(OQ-034)는 정하지 않았습니다. 현재 배포는 무료 플랜 시연용입니다([`docs/deploy-free.md`](./docs/deploy-free.md)).
-- `prisma migrate deploy`는 컨테이너 시작 때 실행됩니다. v1.x 6건은 로컬 컨테이너와 Render·Supabase에서 적용을 확인했습니다. **v2 마이그레이션(`20261116000000_v2_participant_identity`)은 방이 하나라도 있으면 실패하도록 만들었고 배포 DB에는 아직 적용하지 않았습니다.** 배포 DB 적용은 데이터 삭제이므로 사용자 승인 뒤 프론트엔드 2.0.0과 같은 시점에 합니다(절차는 [`docs/g4-evidence.md`](./docs/g4-evidence.md) §7.6). 시험은 SQL을 직접 적용합니다.
+- `prisma migrate deploy`는 컨테이너 시작 때 실행됩니다. v1.x 6건은 로컬 컨테이너와 Render·Supabase에서 적용을 확인했습니다. v2 마이그레이션(`20261116000000_v2_participant_identity`)은 방이 하나라도 있으면 실패하도록 만들었습니다. 배포 DB에는 2026-11-16에 v1.x 데이터를 백업·삭제한 뒤 적용했고 배포본은 v2.0.0입니다([`docs/g4-evidence.md`](./docs/g4-evidence.md) §7.10). 시험은 SQL을 직접 적용합니다.
 - 문서에 반영할 목록(ddallang 문서 PR 예정)은 [`docs/g4-evidence.md`](./docs/g4-evidence.md) §5에 모아 두었습니다(개발 CORS 기본값, `INTERNAL_ERROR`, 잘못된 JSON·경로의 응답, 금액 `INVALID_VALUE`, `RequestTimeoutError` 매핑, 임대·하트비트 기본값, 종료 만료 메시지, 22자가 아닌 거래 ID 응답 등).
 - 시간 의존 시험이 간헐적으로 실패하던 원인(시험 간 공유 채널의 형식이 틀린 통지)은 고쳤고, 전체 시험은 연속 두 번 통과했습니다. 반복 안정성 통계는 없습니다.
 - 지연 측정은 같은 호스트·로컬 DB 기준이며 왕복 150ms 조건과 브라우저 렌더링은 포함하지 않습니다.

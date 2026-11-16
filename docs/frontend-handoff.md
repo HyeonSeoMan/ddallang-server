@@ -2,7 +2,7 @@
 
 작성: 2026-11-16, 기준 Spec S1~S5 **v0.3.0**(접속자·참여자 통합, `ddallang` `main` `c52ec81`), `ddallang-server` 브랜치 `HyeonSeoMan/new-policy`. 이 문서는 **프론트엔드 작업을 하는 사람과 AI**가 백엔드를 이해하고 올바르게 붙이도록 만든 요약이다.
 
-> **배포본은 아직 v1.x다.** v2.0.0(이 문서)은 로컬에서만 돈다. 배포 DB에 v2 마이그레이션을 적용하는 것은 데이터 삭제라서 사용자 승인 뒤 프론트엔드 2.0.0과 같은 시점에 배포한다(RK-20, [`g4-evidence.md`](./g4-evidence.md) §7.6). 그 전까지 실서버 점검(FE-M8)은 로컬 서버로 한다(§8).
+> **배포본은 v2.0.0이다(2026-11-16 22:32 KST 전환).** 배포 DB의 v1.x 데이터는 지웠다(백업 보관). 지금 배포된 프론트엔드 1.x는 응답 모양이 달라 동작하지 않으며, 사용자 결정으로 프론트엔드 2.0.0과 시점을 맞추지 않았다. 실서버 점검(FE-M8)은 배포본으로 할 수 있다. 전환 기록은 [`g4-evidence.md`](./g4-evidence.md) §7.10.
 
 ## 0. 이 문서를 읽는 법 (AI 에이전트용)
 
@@ -16,7 +16,7 @@
 | 항목             | 상태                                                                                                                    |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | v1.x(BE-F1~Z1)   | 구현·배포 완료(Render + Supabase, `https://ddallang-api.onrender.com`)                                                  |
-| v2.0.0(BE-M1~Z2) | **구현 완료, 미배포**. 시험 714개 통과, 백엔드 담당 AC 215/215에 통과한 시험이 있음                                     |
+| v2.0.0(BE-M1~Z2) | **배포 완료(2026-11-16)**. 시험 714개 통과, 백엔드 담당 AC 215/215에 통과한 시험이 있음, 배포본 점검 21개 통과          |
 | 검수             | 묶음 [M1~M3] Codex 2/3 PASS, [M4] 1/3 PASS, [M5] 1/3 PASS, [M6~M8] 3/3 PASS(정적 검수, Codex는 DB 시험을 실행하지 못함) |
 | 기술             | NestJS 12(ESM), TypeScript, PostgreSQL 16, Prisma 7, REST + SSE                                                         |
 | 허용 출처(CORS)  | 배포본은 `http://localhost:3000`만. 프론트를 배포하면 Render의 `CORS_ORIGINS`를 바꿔 재배포해야 함                      |
@@ -48,7 +48,8 @@
 
 ## 2. 접속 정보
 
-- **Base URL**: 로컬 `http://localhost:3001`(v2.0.0). 배포본 `https://ddallang-api.onrender.com`은 v2.0.0 배포 전까지 v1.x 계약이다.
+- **Base URL**: 배포본 `https://ddallang-api.onrender.com`(v2.0.0), 로컬 `http://localhost:3001`.
+- **배포본 지연(2026-11-16 측정, 한국 → Render 싱가포르 → Supabase 시드니)**: `GET /health`(DB 없음) 중앙값 133ms, 읽기(`GET balances`) 약 0.8초, 쓰기(`POST transactions`) 약 1.8~2.0초. 대부분 서버와 DB 사이 왕복이다(DB 지역 이전은 무료 슬롯 한도로 보류). 쓰기 응답을 기다리는 동안 로딩 상태를 보여 준다.
 - **형식**: JSON(`Content-Type: application/json`), 시각은 RFC 3339 UTC 문자열, 금액은 정수(방의 `unit`과 환산 없음).
 - **CORS**: 사전 요청(OPTIONS)에 허용 헤더 `Authorization`, `Content-Type`, `Idempotency-Key`, `Idempotency-First-Attempt-At`를 허용하고, 응답 노출 헤더는 `Date`, `Idempotent-Replayed`, `Retry-After`다.
 
@@ -225,7 +226,7 @@
 | 환경             | 방법                                                                                                                                                                                                                    |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 로컬(v2.0.0)     | 이 브랜치에서 `docker compose up -d`, `pnpm install`, `pnpm exec prisma migrate deploy`(빈 DB 또는 `prisma/reset-v1-data.sql`로 지운 DB), `pnpm build` 후 `NODE_ENV=development node dist/main.js`(Swagger `/api-docs`) |
-| 배포본           | `https://ddallang-api.onrender.com` — v2.0.0 배포 전까지 v1.x 계약                                                                                                                                                      |
+| 배포본           | `https://ddallang-api.onrender.com` — v2.0.0(2026-11-16 전환)                                                                                                                                                           |
 | v2.0.0 배포 순서 | [`g4-evidence.md`](./g4-evidence.md) §7.6(사용자 승인, 배포 DB 초기화, 프론트엔드 2.0.0과 같은 시점)                                                                                                                    |
 
 ## 9. 참조
