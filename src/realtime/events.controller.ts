@@ -64,7 +64,7 @@ export class EventsController {
     headers: { 'Retry-After': { description: '초', schema: { type: 'string', example: '30' } } },
     schema: ERROR_SCHEMA,
   })
-  @ApiErrors('UNAUTHENTICATED', 'ROOM_NOT_FOUND', 'VALIDATION_FAILED')
+  @ApiErrors('UNAUTHENTICATED', 'IDENTITY_REVOKED', 'ROOM_NOT_FOUND', 'VALIDATION_FAILED')
   async stream(
     @CurrentRequester() requester: RequesterContext,
     @Query() query: Record<string, unknown>,

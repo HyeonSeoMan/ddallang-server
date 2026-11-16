@@ -192,8 +192,13 @@ describe('Swagger 문서 검수 항목 (회귀 방지)', () => {
       'PARTICIPANT_LIMIT_EXCEEDED',
     ]);
     expect(codesOf('/rooms/{roomId}/participants', 'post', '403')).toEqual(['HOST_ONLY']);
-    expect(codesOf('/rooms/{roomId}/transactions/{transactionId}', 'put', '403')).toEqual([
+    expect(codesOf('/rooms/{roomId}/transactions/{transactionId}', 'put', '403').sort()).toEqual([
       'NOT_AUTHOR_OR_HOST',
+      'REQUESTER_INACTIVE',
+    ]);
+    expect(codesOf('/rooms/{roomId}/transactions', 'post', '401').sort()).toEqual([
+      'IDENTITY_REVOKED',
+      'UNAUTHENTICATED',
     ]);
     expect(codesOf('/rooms/{roomId}/transactions', 'post', '409').sort()).toEqual([
       'GAME_ENDED',

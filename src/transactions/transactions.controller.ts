@@ -38,11 +38,7 @@ const apply =
   };
 
 function requesterOf(r: RequesterContext): Requester {
-  return {
-    participantId: r.participant.id,
-    roomId: r.participant.roomId,
-    isHost: r.participant.isHost,
-  };
+  return { roomId: r.participant.roomId, identityKeyHash: r.identityKeyHash };
 }
 
 /** 재전송이면 `Idempotent-Replayed: true`를 더하고 저장된 상태 코드·본문을 그대로 돌려준다(S2 §5.3). */
@@ -63,7 +59,9 @@ export class TransactionsController {
   @Post()
   @HttpCode(201)
   @apply(...idempotencyHeaders())
-  @ApiOperation({ summary: '거래 생성 (S2 §4.1)' })
+  @ApiOperation({
+    summary: '거래 생성 (S2 §4.1). 이 방의 활성 참여자(비활성은 REQUESTER_INACTIVE)',
+  })
   @ApiBody({
     schema: {
       type: 'object',
@@ -97,7 +95,9 @@ export class TransactionsController {
   })
   @ApiErrors(
     'UNAUTHENTICATED',
+    'IDENTITY_REVOKED',
     'ROOM_NOT_FOUND',
+    'REQUESTER_INACTIVE',
     'VALIDATION_FAILED',
     'IDEMPOTENCY_KEY_EXPIRED',
     'IDEMPOTENCY_CONFLICT',
@@ -144,7 +144,9 @@ export class TransactionsController {
   })
   @ApiErrors(
     'UNAUTHENTICATED',
+    'IDENTITY_REVOKED',
     'ROOM_NOT_FOUND',
+    'REQUESTER_INACTIVE',
     'TRANSACTION_NOT_FOUND',
     'NOT_AUTHOR_OR_HOST',
     'VALIDATION_FAILED',
@@ -185,7 +187,9 @@ export class TransactionsController {
   })
   @ApiErrors(
     'UNAUTHENTICATED',
+    'IDENTITY_REVOKED',
     'ROOM_NOT_FOUND',
+    'REQUESTER_INACTIVE',
     'TRANSACTION_NOT_FOUND',
     'NOT_AUTHOR_OR_HOST',
     'VALIDATION_FAILED',

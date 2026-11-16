@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { relinkInLock, type LinkedParticipant } from '../common/auth/identity.js';
 import { DatabaseService, type DbTx, type RoomEvent } from '../common/db/database.service.js';
 import { toTransactionDto } from '../common/domain/dto.js';
 import { TRANSACTION_LIMIT } from '../common/domain/limits.js';
@@ -22,10 +23,10 @@ export interface Reply extends StoredResponse {
   replayed: boolean;
 }
 
+/** 요청 경로의 방과 요청자 신원 키 해시. 요청자 참여자는 방 잠금 안에서 다시 판정한다(S2-C3, PD-24). */
 export interface Requester {
-  participantId: string;
   roomId: string;
-  isHost: boolean;
+  identityKeyHash: string;
 }
 
 interface HandlerResult extends StoredResponse {
@@ -34,7 +35,8 @@ interface HandlerResult extends StoredResponse {
   record?: boolean;
 }
 
-type Handler = (ctx: { tx: DbTx; now: Date }) => Promise<HandlerResult>;
+/** `me`는 잠금을 얻은 시점의 요청자 참여자(활성)다. 작성자·방장 판정은 이 값으로 한다. */
+type Handler = (ctx: { tx: DbTx; now: Date; me: LinkedParticipant }) => Promise<HandlerResult>;
 
 /** 상태에 따른 영구적 거부: 오류 응답을 만들되 던지지 않고 기록해 같은 키 재전송이 같은 거부를 받게 한다. */
 function permanentRejection(code: ErrorCode, options?: ApiErrorOptions): HandlerResult {
@@ -53,8 +55,9 @@ export class TransactionsService {
   ) {}
 
   /**
-   * 공통 파이프라인(S2 §3.4): 3(헤더) → 방 잠금 → 4(만료)·5(재전송) → 연산별 6~12 → 기록 → 커밋.
-   * 1·2(인증·멤버)는 가드가 앞서 처리한다. 4~12는 모두 방 단위 잠금 안의 한 트랜잭션이다.
+   * 공통 파이프라인(S2 §3.4): 3(헤더) → 방 잠금 → 2(요청자 재확인: 접근 상실 401·연결 없음 404, 재전송보다 앞)
+   * → 4(만료)·5(재전송, 범위는 (방, 참여자)) → 5a(비활성 요청자 403 `REQUESTER_INACTIVE`, 기록 없음) → 연산별 6~12
+   * → 기록 → 커밋. 1·2의 1차 판정은 가드가 앞서 한다. 2(재확인)·4~12는 모두 방 단위 잠금 안의 한 트랜잭션이다.
    */
   private async execute(args: {
     requester: Requester;
@@ -77,18 +80,20 @@ export class TransactionsService {
     });
 
     const { value } = await this.db.withRoomMutation<Reply>(requester.roomId, async (tx) => {
+      const me = await relinkInLock(tx, requester.roomId, requester.identityKeyHash); // 2번 재확인
       const now = await this.db.dbNow(tx); // 잠금을 얻은 시점의 DB 시각
       const base = {
         roomId: requester.roomId,
-        participantId: requester.participantId,
+        participantId: me.id,
         key,
         firstAttemptAt,
         fingerprint: print,
       };
       const stored = await this.idempotency.lookup(tx, { ...base, now }); // 4·5번
       if (stored) return { value: { ...stored, replayed: true } };
+      if (me.status !== 'ACTIVE') throw new ApiError('REQUESTER_INACTIVE'); // 5a번(기록하지 않는다)
 
-      const result = await args.handler({ tx, now });
+      const result = await args.handler({ tx, now, me });
       if (result.record !== false) {
         await this.idempotency.record(tx, {
           ...base,
@@ -115,7 +120,7 @@ export class TransactionsService {
       operation: 'CREATE',
       headers,
       input,
-      handler: async ({ tx, now }) => {
+      handler: async ({ tx, now, me }) => {
         const room = await tx.room.findUniqueOrThrow({
           where: { id: requester.roomId },
           select: { status: true },
@@ -184,7 +189,7 @@ export class TransactionsService {
             amount: BigInt(amount!),
             reason: reason ?? null,
             round: round ?? null,
-            authorId: requester.participantId, // 본문의 작성자 값은 신뢰하지 않는다
+            authorId: me.id, // 본문의 작성자 값은 신뢰하지 않는다
             originalAmount: BigInt(amount!),
             originalReason: reason ?? null,
             originalRound: round ?? null,
@@ -214,8 +219,8 @@ export class TransactionsService {
       targetId: transactionId,
       headers,
       input,
-      handler: async ({ tx }) => {
-        const target = await this.loadTarget(tx, requester, transactionId); // 6·7번
+      handler: async ({ tx, me }) => {
+        const target = await this.loadTarget(tx, requester.roomId, me, transactionId); // 6·7번
         const room = await tx.room.findUniqueOrThrow({
           where: { id: requester.roomId },
           select: { status: true },
@@ -268,8 +273,8 @@ export class TransactionsService {
       targetId: transactionId,
       headers,
       input: { parseFailed: false, body: {}, nonObjectJson: false, unparsedPayload: false },
-      handler: async ({ tx, now }) => {
-        const target = await this.loadTarget(tx, requester, transactionId); // 6·7번
+      handler: async ({ tx, now, me }) => {
+        const target = await this.loadTarget(tx, requester.roomId, me, transactionId); // 6·7번
         const room = await tx.room.findUniqueOrThrow({
           where: { id: requester.roomId },
           select: { status: true },
@@ -280,7 +285,7 @@ export class TransactionsService {
         const deletedAt = await this.nextUpdatedAt(tx, target.createdAt, now);
         await tx.transaction.update({
           where: { id: transactionId },
-          data: { deletedAt, deletedById: requester.participantId },
+          data: { deletedAt, deletedById: me.id },
         });
         return {
           status: 200,
@@ -294,13 +299,10 @@ export class TransactionsService {
   // ---- 공통 보조 ----
 
   /** 6번(대상 존재, 다른 방의 거래 ID도 같은 404)과 7번(작성자 또는 방장). 둘 다 기록하지 않는 거부다. */
-  private async loadTarget(tx: DbTx, requester: Requester, transactionId: string) {
-    const target = await tx.transaction.findFirst({
-      where: { id: transactionId, roomId: requester.roomId },
-    });
+  private async loadTarget(tx: DbTx, roomId: string, me: LinkedParticipant, transactionId: string) {
+    const target = await tx.transaction.findFirst({ where: { id: transactionId, roomId } });
     if (!target) throw new ApiError('TRANSACTION_NOT_FOUND');
-    if (target.authorId !== requester.participantId && !requester.isHost)
-      throw new ApiError('NOT_AUTHOR_OR_HOST');
+    if (target.authorId !== me.id && !me.isHost) throw new ApiError('NOT_AUTHOR_OR_HOST');
     return target;
   }
 

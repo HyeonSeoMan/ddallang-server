@@ -31,7 +31,7 @@ export class BalancesController {
     description: '참여자별 순손익(모든 참여자, balance 내림차순·order 오름차순)',
     schema: obj({ balances: arrayOf(BALANCE_SCHEMA) }),
   })
-  @ApiErrors('UNAUTHENTICATED', 'ROOM_NOT_FOUND', 'VALIDATION_FAILED')
+  @ApiErrors('UNAUTHENTICATED', 'IDENTITY_REVOKED', 'ROOM_NOT_FOUND', 'VALIDATION_FAILED')
   async getBalances(
     @CurrentRequester() requester: RequesterContext,
     @Query() query: Q,
@@ -53,7 +53,7 @@ export class BalancesController {
       nextCursor: { type: 'string', nullable: true },
     }),
   })
-  @ApiErrors('UNAUTHENTICATED', 'ROOM_NOT_FOUND', 'VALIDATION_FAILED')
+  @ApiErrors('UNAUTHENTICATED', 'IDENTITY_REVOKED', 'ROOM_NOT_FOUND', 'VALIDATION_FAILED')
   list(
     @CurrentRequester() requester: RequesterContext,
     @Query() query: Q,

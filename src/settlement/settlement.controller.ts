@@ -45,6 +45,7 @@ export class SettlementController {
   })
   @ApiErrors(
     'UNAUTHENTICATED',
+    'IDENTITY_REVOKED',
     'ROOM_NOT_FOUND',
     'HOST_ONLY',
     'VALIDATION_FAILED',
@@ -59,11 +60,7 @@ export class SettlementController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<unknown> {
     const reply = await this.settlement.end(
-      {
-        participantId: requester.participant.id,
-        roomId: requester.participant.roomId,
-        isHost: requester.participant.isHost,
-      },
+      { roomId: requester.participant.roomId, identityKeyHash: requester.identityKeyHash },
       headers,
       body,
     );
@@ -82,7 +79,7 @@ export class SettlementController {
     description: '정산 종류와 항목(없으면 빈 배열)',
     schema: obj({ settlement: SETTLEMENT_SCHEMA }),
   })
-  @ApiErrors('UNAUTHENTICATED', 'ROOM_NOT_FOUND', 'VALIDATION_FAILED')
+  @ApiErrors('UNAUTHENTICATED', 'IDENTITY_REVOKED', 'ROOM_NOT_FOUND', 'VALIDATION_FAILED')
   async get(
     @CurrentRequester() requester: RequesterContext,
     @Query() query: Q,

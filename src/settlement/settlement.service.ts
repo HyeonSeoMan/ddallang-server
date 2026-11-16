@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { relinkInLock } from '../common/auth/identity.js';
 import { queryBalances, safeBalance } from '../common/domain/balances.js';
 import { DatabaseService } from '../common/db/database.service.js';
 import { ApiError, errorBody } from '../common/errors/api-error.js';
@@ -13,10 +14,10 @@ export interface Reply extends StoredResponse {
   replayed: boolean;
 }
 
+/** 요청 경로의 방과 요청자 신원 키 해시. 요청자 참여자는 방 잠금 안에서 다시 판정한다(S4 §3.3 2, PD-24). */
 export interface Requester {
-  participantId: string;
   roomId: string;
-  isHost: boolean;
+  identityKeyHash: string;
 }
 
 export interface SettlementItemDto {
@@ -44,7 +45,8 @@ export class SettlementService {
   ) {}
 
   /**
-   * S4 §3.3·§6.1 게임 종료. 1·2(인증·멤버)는 가드, 3(헤더) → 방 잠금 → 4(만료)·5(재전송) → 6(방장) →
+   * S4 §3.3·§6.1 게임 종료. 1·2(인증·요청자)는 가드, 3(헤더) → 방 잠금 → 2 재확인(접근 상실 401, 재전송보다 앞) →
+   * 4(만료)·5(재전송, 범위 (방, 참여자)) → 6(방장) →
    * 7(`GAME_ENDED`, 기록) → 8(본문) → 상태 변경·`revision`+1·멱등 기록·`room.ended`를 한 트랜잭션으로 처리한다.
    */
   async end(
@@ -71,10 +73,11 @@ export class SettlementService {
     });
 
     const { value } = await this.db.withRoomMutation<Reply>(requester.roomId, async (tx) => {
+      const me = await relinkInLock(tx, requester.roomId, requester.identityKeyHash); // 2번 재확인
       const now = await this.db.dbNow(tx);
       const base = {
         roomId: requester.roomId,
-        participantId: requester.participantId,
+        participantId: me.id,
         key,
         firstAttemptAt,
         fingerprint: print,
@@ -86,7 +89,7 @@ export class SettlementService {
       }); // 4·5번
       if (stored) return { value: { ...stored, replayed: true } };
 
-      if (!requester.isHost) throw new ApiError('HOST_ONLY'); // 6번(기록하지 않는다)
+      if (!me.isHost) throw new ApiError('HOST_ONLY'); // 6번(기록하지 않는다)
 
       const room = await tx.room.findUniqueOrThrow({
         where: { id: requester.roomId },
