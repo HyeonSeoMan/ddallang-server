@@ -128,7 +128,10 @@ export class RoomStreamsService implements OnModuleDestroy {
   }
 
   private async heartbeat(roomId: string, streams: Streams): Promise<void> {
-    const participantIds = [...new Set([...streams.values()].map((id) => id.participantId))];
+    // 질의 대상과 판정 대상을 같은 스냅샷으로 둔다. 질의 중에 붙은 스트림은 이번 판정에서 빠지고 다음 하트비트에서 본다
+    // (그 스트림은 방금 ready를 받았다).
+    const snapshot = [...streams];
+    const participantIds = [...new Set(snapshot.map(([, id]) => id.participantId))];
     try {
       // revision과 스트림 참여자들의 현재 연결 해시를 한 질의로 읽는다(방당 한 질의, PD-27)
       const rows = await this.prisma.client.$queryRaw<
@@ -141,7 +144,8 @@ export class RoomStreamsService implements OnModuleDestroy {
       if (rows.length === 0) return;
       const linked = new Map(rows.map((r) => [r.participantId, r.keyHash]));
       const data = { roomId, revision: rows[0]!.revision, serverTime: new Date().toISOString() };
-      for (const [stream, id] of [...streams]) {
+      for (const [stream, id] of snapshot) {
+        if (stream.isClosed) continue;
         if (linked.get(id.participantId) !== id.keyHash) this.revoke(roomId, stream);
         else stream.send({ event: 'heartbeat', data });
       }

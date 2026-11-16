@@ -294,6 +294,7 @@ describe('실시간 지연 측정 (S5 §6.7 표 그대로, BE-S5-4·BE-S4-7, 개
   async function measureRequester(
     kind: string,
     l: Live,
+    expected: 'APPROVED' | 'REJECTED',
     decide: (claimId: string) => Promise<ApiRes>,
   ) {
     const key = newKey();
@@ -308,7 +309,7 @@ describe('실시간 지연 측정 (S5 §6.7 표 그대로, BE-S5-4·BE-S4-7, 개
       await sleep(Math.random() * 2_000); // 조회 위상
       while (!stop) {
         const res = await api(at(2), 'GET', `/invites/${l.room.inviteCode}/claims/${claimId}`, key);
-        if (t0 && res.body.claim?.status !== 'PENDING') {
+        if (t0 && res.status === 200 && res.body.claim?.status === expected) {
           seenAt = Date.now();
           return;
         }
@@ -332,10 +333,10 @@ describe('실시간 지연 측정 (S5 §6.7 표 그대로, BE-S5-4·BE-S4-7, 개
     for (let n = 0; n < 10; n++) {
       const l = await liveRoom(9, 1000, 1);
       try {
-        await measureRequester('claim.resolved 거절(요청자 화면)', l, (id) =>
+        await measureRequester('claim.resolved 거절(요청자 화면)', l, 'REJECTED', (id) =>
           api(at(n), 'POST', `/rooms/${l.room.roomId}/claims/${id}/reject`, l.room.key),
         );
-        await measureRequester('claim.resolved 승인(요청자 화면)', l, (id) =>
+        await measureRequester('claim.resolved 승인(요청자 화면)', l, 'APPROVED', (id) =>
           api(at(n), 'POST', `/rooms/${l.room.roomId}/claims/${id}/approve`, l.room.key),
         );
       } finally {

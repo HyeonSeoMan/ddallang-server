@@ -237,18 +237,38 @@ describe('S1 §7 개정 경합 (프로세스 3개, BE-M7)', () => {
     ac(
       ['AC-ROOM-004-3', 'AC-ROOM-006-11'],
       'S1 §7 4',
-      '같은 키의 입장 N개 → 201 하나·나머지 200 같은 me.id. 같은 키의 입장과 이어받기 요청 동시 → 먼저 처리된 쪽만 성공, 다른 쪽은 CLAIM_PENDING 또는 ALREADY_PARTICIPANT',
+      '같은 키의 입장 N개 → 201 하나·나머지 200 같은 me.id(변경 1건). 같은 키의 이어받기 요청 N개 → PENDING 하나·나머지 CLAIM_PENDING. 같은 키의 입장과 이어받기 요청 동시 → 먼저 처리된 쪽만 성공, 다른 쪽은 CLAIM_PENDING 또는 ALREADY_PARTICIPANT',
     ),
     async () => {
       const seen = new Set<string>();
       for (let round = 0; round < ROUNDS * 2; round++) {
         const r = await makeRoom(at(round), 1);
         const key = newKey();
-        const twins = await Promise.all(
-          Array.from({ length: 6 }, (_, i) => join(round + i, r, 'Twin', key).then((x) => x.res)),
+        const { result: twins } = await window(
+          r.roomId,
+          () =>
+            Promise.all(
+              Array.from({ length: 6 }, (_, i) =>
+                join(round + i, r, 'Twin', key).then((x) => x.res),
+              ),
+            ),
+          () => 1, // 복원은 revision·이벤트를 만들지 않는다
         );
         expect(tally(twins)).toEqual({ '201': 1, '200': 5 });
         expect(new Set(twins.map((x) => x.body.me.id)).size).toBe(1);
+
+        const ck = newKey();
+        const { result: claims } = await window(
+          r.roomId,
+          () => Promise.all(Array.from({ length: 6 }, (_, i) => claim(round + i, r, ck, 'P0'))),
+          () => 1,
+        );
+        expect(tally(claims)).toEqual({ '201': 1, '409 CLAIM_PENDING': 5 });
+        const pendings = await db.query(
+          `SELECT 1 FROM "ClaimRequest" WHERE "roomId"=$1 AND "status"='PENDING' AND "requesterKeyHash" = encode(sha256(convert_to($2,'UTF8')),'hex')`,
+          [r.roomId, ck],
+        );
+        expect(pendings).toHaveLength(1);
 
         const k = newKey();
         const { result } = await window(
@@ -275,6 +295,7 @@ describe('S1 §7 개정 경합 (프로세스 3개, BE-M7)', () => {
         await invariants(r.roomId);
       }
       console.info(`[BE-M7] 같은 키 입장 대 이어받기: ${[...seen].join(', ')}`);
+      expect([...seen].sort()).toEqual(['claim first', 'join first']); // 두 처리 순서가 모두 관찰됐다
     },
   );
 
@@ -311,6 +332,7 @@ describe('S1 §7 개정 경합 (프로세스 3개, BE-M7)', () => {
         await invariants(r.roomId);
       }
       console.info(`[BE-M7] 승인·거절·취소 경합 승자: ${JSON.stringify(winners)}`);
+      expect(Object.keys(winners).sort()).toEqual(['approve', 'cancel', 'reject']);
     },
   );
 
@@ -387,6 +409,7 @@ describe('S1 §7 개정 경합 (프로세스 3개, BE-M7)', () => {
         await invariants(r.roomId);
       }
       console.info(`[BE-M7] 승인 대 입장: ${[...seen].join(', ')}`);
+      expect([...seen].sort()).toEqual(['approve first', 'join first']);
     },
   );
 
@@ -440,6 +463,7 @@ describe('S1 §7 개정 경합 (프로세스 3개, BE-M7)', () => {
         await invariants(r.roomId);
       }
       console.info(`[BE-M7] 종료 대 입장: ${[...seen].join(', ')}`);
+      expect([...seen].sort()).toEqual(['end first', 'join first']);
     },
   );
 
@@ -447,15 +471,25 @@ describe('S1 §7 개정 경합 (프로세스 3개, BE-M7)', () => {
     ac(
       ['AC-PART-002-8', 'AC-PART-002-13'],
       'S1 §7 8, S2 §7 5·5b',
-      '비활성화 대 그 참여자를 당사자로 한 생성·그 참여자 신원의 생성 → 처리 시점 상태(PARTICIPANT_INACTIVE·REQUESTER_INACTIVE 또는 201)',
+      '비활성화 대 그 참여자를 당사자로 한 생성·그 참여자 신원의 생성·수정·삭제 → 처리(직렬) 시점 상태: 비활성화 뒤면 PARTICIPANT_INACTIVE·REQUESTER_INACTIVE(기록 없음), 앞이면 성공',
     ),
     async () => {
-      const seen = new Set<string>();
+      const seen: Record<string, Set<number>> = {};
+      const body = (r: Room, extra: object) => ({ payerId: r.hostId, payeeId: r.p[0], ...extra });
       for (let round = 0; round < ROUNDS * 2; round++) {
         const r = await makeRoom(at(round), 1);
         const kim = await join(round, r, 'Kim');
         const kimId = kim.res.body.me.id as string;
-        const { result } = await window(
+        const tx = (i: number, key: string, extra: object) =>
+          api(at(i), 'POST', `/rooms/${r.roomId}/transactions`, key, body(r, extra), idem());
+        const own = [
+          (await tx(round, kim.key, { amount: 1 })).body.transaction.id as string,
+          (await tx(round, kim.key, { amount: 2 })).body.transaction.id as string,
+        ];
+        const recsBefore = (
+          await db.query(`SELECT 1 FROM "IdempotencyRecord" WHERE "participantId"=$1`, [kimId])
+        ).length;
+        const { result, events } = await window(
           r.roomId,
           () =>
             race(round, [
@@ -463,42 +497,71 @@ describe('S1 §7 개정 경합 (프로세스 3개, BE-M7)', () => {
                 api(at(round), 'PATCH', `/rooms/${r.roomId}/participants/${kimId}`, r.key, {
                   status: 'INACTIVE',
                 }),
+              () => tx(round + 1, r.key, { payerId: kimId, amount: 10 }), // 당사자로 지정
+              () => tx(round + 2, kim.key, { amount: 20 }), // 요청자로 생성
               () =>
                 api(
-                  at(round + 1),
-                  'POST',
-                  `/rooms/${r.roomId}/transactions`,
-                  r.key,
-                  { payerId: kimId, payeeId: r.p[0], amount: 10 },
+                  at(round + 3),
+                  'PUT',
+                  `/rooms/${r.roomId}/transactions/${own[0]}`,
+                  kim.key,
+                  { amount: 30 },
                   idem(),
                 ),
               () =>
                 api(
-                  at(round + 2),
-                  'POST',
-                  `/rooms/${r.roomId}/transactions`,
+                  at(round + 4),
+                  'DELETE',
+                  `/rooms/${r.roomId}/transactions/${own[1]}`,
                   kim.key,
-                  { payerId: r.hostId, payeeId: r.p[0], amount: 20 },
+                  undefined,
                   idem(),
                 ),
             ]),
           (rs) => rs.filter(ok).length,
         );
-        const [st, asParty, asRequester] = result as [ApiRes, ApiRes, ApiRes];
-        expect(st.status).toBe(200);
-        expect([201, 409]).toContain(asParty.status);
-        if (asParty.status === 409) expect(asParty.body.error.code).toBe('PARTICIPANT_INACTIVE');
-        expect([201, 403]).toContain(asRequester.status);
-        if (asRequester.status === 403)
-          expect(asRequester.body.error.code).toBe('REQUESTER_INACTIVE');
-        seen.add(`party ${asParty.status} / requester ${asRequester.status}`);
-        const recs = await db.query(`SELECT 1 FROM "IdempotencyRecord" WHERE "participantId"=$1`, [
-          kimId,
-        ]);
-        expect(recs.length).toBe(asRequester.status === 201 ? 1 : 0); // 거부는 기록하지 않는다
+        const [st, asParty, create, update, remove] = result as ApiRes[];
+        expect(st!.status).toBe(200);
+        const deactivatedAt = Number(
+          events.find((e) => e.event === 'participant.status_changed')!.revision,
+        );
+        const cases: [string, ApiRes, number, number, string][] = [
+          ['party', asParty!, 201, 409, 'PARTICIPANT_INACTIVE'],
+          ['create', create!, 201, 403, 'REQUESTER_INACTIVE'],
+          ['update', update!, 200, 403, 'REQUESTER_INACTIVE'],
+          ['delete', remove!, 200, 403, 'REQUESTER_INACTIVE'],
+        ];
+        for (const [label, res, okStatus, badStatus, code] of cases) {
+          (seen[label] ??= new Set()).add(res.status);
+          if (res.status === okStatus) {
+            // 성공했다면 비활성화보다 먼저 커밋됐다(직렬 순서)
+            const id =
+              label === 'update' ? own[0] : label === 'delete' ? own[1] : res.body.transaction.id;
+            const mine = events.find((e) => e.transactionId === id)!;
+            expect(Number(mine.revision), label).toBeLessThan(deactivatedAt);
+          } else {
+            expect([res.status, res.body.error?.code], label).toEqual([badStatus, code]);
+          }
+        }
+        const kimOk = [create!, update!, remove!].filter(ok).length;
+        const recs = (
+          await db.query(`SELECT 1 FROM "IdempotencyRecord" WHERE "participantId"=$1`, [kimId])
+        ).length;
+        expect(recs - recsBefore).toBe(kimOk); // 거부(REQUESTER_INACTIVE)는 기록하지 않는다
         await invariants(r.roomId);
       }
-      console.info(`[BE-M7] 비활성화 대 거래: ${[...seen].join(', ')}`);
+      console.info(
+        `[BE-M7] 비활성화 대 거래: ${Object.entries(seen)
+          .map(([k, v]) => `${k} ${[...v].sort().join('/')}`)
+          .join(', ')}`,
+      );
+      // 각 요청에서 비활성화 앞·뒤 두 순서가 모두 관찰됐다
+      expect(Object.fromEntries(Object.entries(seen).map(([k, v]) => [k, [...v].sort()]))).toEqual({
+        party: [201, 409],
+        create: [201, 403],
+        update: [200, 403],
+        delete: [200, 403],
+      });
     },
   );
 
@@ -568,6 +631,12 @@ describe('S1 §7 개정 경합 (프로세스 3개, BE-M7)', () => {
         await invariants(r.roomId);
       }
       console.info(`[BE-M7] 승인 대 이전 키 거래: ${[...seen].join(', ')}`);
+      expect([...seen].sort()).toEqual([
+        'fresh after approve',
+        'fresh before approve',
+        'replay after approve',
+        'replay before approve',
+      ]);
     },
   );
 });
