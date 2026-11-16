@@ -589,7 +589,7 @@ describe('S1 §7 개정 경합 (프로세스 3개, BE-M7)', () => {
         );
         expect(first.status).toBe(201);
         const id = (await claim(round, r, newKey(), 'Kim')).body.claim.id as string;
-        const { result } = await window(
+        const { result, events } = await window(
           r.roomId,
           () =>
             race(round, [
@@ -609,6 +609,12 @@ describe('S1 §7 개정 경합 (프로세스 3개, BE-M7)', () => {
         );
         const [ap, replay, fresh] = result as [ApiRes, ApiRes, ApiRes];
         expect(ap.status).toBe(200);
+        const approvedAt = Number(events.find((e) => e.event === 'claim.resolved')!.revision);
+        if (fresh.status === 201) {
+          // 성공한 새 거래는 직렬 순서에서 승인보다 앞이다
+          const created = events.find((e) => e.transactionId === fresh.body.transaction.id)!;
+          expect(Number(created.revision)).toBeLessThan(approvedAt);
+        }
         for (const [label, res, okStatus] of [
           ['replay', replay, 201],
           ['fresh', fresh, 201],
@@ -637,6 +643,71 @@ describe('S1 §7 개정 경합 (프로세스 3개, BE-M7)', () => {
         'replay after approve',
         'replay before approve',
       ]);
+    },
+  );
+
+  it(
+    ac(
+      ['AC-ROOM-009-5'],
+      'S1 §7 9, S2 §3.4 2·§7 1 (잠금으로 순서 통제)',
+      '가드를 이미 통과한 이전 키의 거래 요청(재전송·새 요청)도 잠금 차례가 승인 뒤면 401 IDENTITY_REVOKED, 앞이면 유효(잠금 안 재판정)',
+    ),
+    async () => {
+      const url = new URL(db.databaseUrl);
+      url.searchParams.delete('schema');
+      for (const approveFirst of [true, false]) {
+        const r = await makeRoom(at(0), 1);
+        const kim = await join(0, r, 'Kim');
+        const body = { payerId: r.hostId, payeeId: r.p[0], amount: 40 };
+        const h = idem();
+        expect(
+          (await api(at(0), 'POST', `/rooms/${r.roomId}/transactions`, kim.key, body, h)).status,
+        ).toBe(201);
+        const id = (await claim(0, r, newKey(), 'Kim')).body.claim.id as string;
+        const holder = new pg.Client({ connectionString: url.toString() });
+        await holder.connect();
+        try {
+          await holder.query('BEGIN');
+          await holder.query(`SELECT 1 FROM "Room" WHERE "id"=$1 FOR UPDATE`, [r.roomId]); // 방 잠금을 쥔다
+          const oldKeyRequests = () => [
+            api(at(1), 'POST', `/rooms/${r.roomId}/transactions`, kim.key, body, h), // 재전송
+            api(at(2), 'POST', `/rooms/${r.roomId}/transactions`, kim.key, body, idem()), // 새 요청
+          ];
+          let ap: Promise<ApiRes>;
+          let olds: Promise<ApiRes>[];
+          if (approveFirst) {
+            ap = approve(0, r, id);
+            await sleep(400); // 승인이 먼저 잠금을 기다린다
+            olds = oldKeyRequests(); // 가드는 승인 커밋 전이라 통과하고 잠금 뒤에 줄을 선다
+          } else {
+            olds = oldKeyRequests();
+            await sleep(400);
+            ap = approve(0, r, id);
+          }
+          await sleep(400);
+          await holder.query('COMMIT'); // 잠금을 놓으면 줄 선 순서대로 처리된다
+          const [a, ...rest] = await Promise.all([ap, ...olds]);
+          expect(a!.status).toBe(200);
+          for (const res of rest) {
+            if (approveFirst)
+              expect([res.status, res.body.error?.code]).toEqual([401, 'IDENTITY_REVOKED']);
+            else expect(res.status).toBe(201);
+          }
+          const n = Number(
+            (
+              await db.query<{ n: string }>(
+                `SELECT count(*)::text AS n FROM "Transaction" WHERE "roomId"=$1`,
+                [r.roomId],
+              )
+            )[0]!.n,
+          );
+          expect(n).toBe(approveFirst ? 1 : 2);
+          await invariants(r.roomId);
+        } finally {
+          await holder.query('ROLLBACK').catch(() => undefined);
+          await holder.end();
+        }
+      }
     },
   );
 });
