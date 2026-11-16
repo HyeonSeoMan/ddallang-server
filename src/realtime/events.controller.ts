@@ -43,6 +43,7 @@ export class EventsController {
       '`id: <revision>` · `event: transaction.created|updated|deleted · participant.created|status_changed · claim.created|canceled|resolved · room.ended` · ' +
       '`data: {roomId, revision, serverTime, transactionId|participantId|claimId}`를 보낸다. 15초마다 `heartbeat{roomId, revision, serverTime}`. ' +
       '이벤트에는 내용(금액·사유·닉네임)을 싣지 않는다. 재전송은 없다: 끊기면 새로 연결해 전체를 재조회한다. ' +
+      '이어받기 승인으로 접근을 잃은 신원의 스트림에는 `access.revoked{roomId, serverTime}`(id·revision 없음)를 보내고 닫는다. ' +
       '한도: 참여자당 5개, 방당 50개(인스턴스 전체 합산). 초과하면 새 연결만 429.',
   })
   @ApiResponse({
@@ -109,7 +110,10 @@ export class EventsController {
     holder.stream = stream;
     stream.whenClosed(() => void this.leases.release(lease.lease.id));
     // 구독을 먼저 걸고 revision을 읽는다: ready 전에 도착한 이벤트는 붙잡아 두었다가 ready 뒤에 보낸다.
-    this.streams.attach(roomId, stream);
+    this.streams.attach(roomId, stream, {
+      participantId: requester.participant.id,
+      keyHash: requester.identityKeyHash,
+    });
     try {
       // LISTEN이 준비된 뒤에 revision을 읽어, 첫 구독·재연결 틈에 커밋된 변경이 ready 이후 이벤트로도 하트비트로도
       // 빠지지 않게 한다(준비가 늦으면 최대 2초만 기다리고 하트비트에 맡긴다).

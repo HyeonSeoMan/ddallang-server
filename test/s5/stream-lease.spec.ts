@@ -3,7 +3,7 @@ import { PrismaService } from '../../src/common/db/prisma.service.js';
 import { newId, newInviteCode } from '../../src/common/ids/ids.js';
 import {
   LEASE_TTL_MS,
-  MEMBER_STREAM_LIMIT,
+  PARTICIPANT_STREAM_LIMIT,
   ROOM_STREAM_LIMIT,
   StreamLeaseService,
 } from '../../src/realtime/stream-lease.service.js';
@@ -58,7 +58,7 @@ describe('임대 한도·갱신·정리 (실제 PostgreSQL, 짧은 TTL=3초)', (
       .then((r) => Number(r[0]!.n));
 
   it('상수: 한도 5·50, 만료 T=15초', () => {
-    expect([MEMBER_STREAM_LIMIT, ROOM_STREAM_LIMIT, LEASE_TTL_MS]).toEqual([5, 50, 15_000]);
+    expect([PARTICIPANT_STREAM_LIMIT, ROOM_STREAM_LIMIT, LEASE_TTL_MS]).toEqual([5, 50, 15_000]);
   });
 
   it('참여자당 5개까지만 허용하고 6번째 새 연결은 거부하며 기존 연결은 유지한다. 해제하면 슬롯이 돌아온다', async () => {

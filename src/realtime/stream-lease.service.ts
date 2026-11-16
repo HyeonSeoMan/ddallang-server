@@ -4,7 +4,7 @@ import { PrismaService } from '../common/db/prisma.service.js';
 import { newId } from '../common/ids/ids.js';
 
 /** S5 §4.1 E-9: 한 참여자당 동시 스트림 5개, 방당 50개(서버 인스턴스 전체 합산, 사용자 결정 D1). */
-export const MEMBER_STREAM_LIMIT = 5;
+export const PARTICIPANT_STREAM_LIMIT = 5;
 export const ROOM_STREAM_LIMIT = 50;
 /** 임대 만료 T = 15초(사용자 결정 D2). */
 export const LEASE_TTL_MS = 15_000;
@@ -89,7 +89,7 @@ export class StreamLeaseService implements OnModuleDestroy {
           SELECT count(*) FILTER (WHERE "participantId" = ${input.participantId}) AS "member", count(*) AS "room"
           FROM "StreamLease" WHERE "roomId" = ${input.roomId}`;
         if (
-          Number(rows[0]!.member) >= MEMBER_STREAM_LIMIT ||
+          Number(rows[0]!.member) >= PARTICIPANT_STREAM_LIMIT ||
           Number(rows[0]!.room) >= ROOM_STREAM_LIMIT
         )
           return false;
