@@ -43,8 +43,8 @@ describe('임대 한도·갱신·정리 (실제 PostgreSQL, 짧은 TTL=3초)', (
     for (let i = 0; i < memberCount; i++) {
       const id = newId();
       await db.query(
-        `INSERT INTO "RoomMember" ("id","roomId","nickname","nicknameKey","isHost","identityKeyHash") VALUES ($1,$2,$3,$3,$4,$5)`,
-        [id, roomId, `m${i}`, i === 0, String(i).padStart(64, 'a')],
+        `INSERT INTO "Participant" ("id","roomId","nickname","nicknameKey","order","isHost","identityKeyHash") VALUES ($1,$2,$3,$3,$4,$5,$6)`,
+        [id, roomId, `m${i}`, i + 1, i === 0, String(i).padStart(64, 'a')],
       );
       members.push(id);
     }
@@ -61,23 +61,27 @@ describe('임대 한도·갱신·정리 (실제 PostgreSQL, 짧은 TTL=3초)', (
     expect([MEMBER_STREAM_LIMIT, ROOM_STREAM_LIMIT, LEASE_TTL_MS]).toEqual([5, 50, 15_000]);
   });
 
-  it('RoomMember당 5개까지만 허용하고 6번째 새 연결은 거부하며 기존 연결은 유지한다. 해제하면 슬롯이 돌아온다', async () => {
+  it('참여자당 5개까지만 허용하고 6번째 새 연결은 거부하며 기존 연결은 유지한다. 해제하면 슬롯이 돌아온다', async () => {
     const { roomId, members } = await room(2);
     const s = svc();
     const open = [];
     for (let i = 0; i < 5; i++) {
-      const r = await s.acquire({ roomId, memberId: members[0]! }, () => undefined);
+      const r = await s.acquire({ roomId, participantId: members[0]! }, () => undefined);
       expect(r.ok).toBe(true);
       if (r.ok) open.push(r.lease);
     }
-    expect(await s.acquire({ roomId, memberId: members[0]! }, () => undefined)).toEqual({
+    expect(await s.acquire({ roomId, participantId: members[0]! }, () => undefined)).toEqual({
       ok: false,
       reason: 'limit',
     });
     expect(open.every((l) => l.alive())).toBe(true); // 기존 5개는 유지된다
-    expect((await s.acquire({ roomId, memberId: members[1]! }, () => undefined)).ok).toBe(true); // 다른 멤버는 별도 한도
+    expect((await s.acquire({ roomId, participantId: members[1]! }, () => undefined)).ok).toBe(
+      true,
+    ); // 다른 멤버는 별도 한도
     await s.release(open[0]!.id);
-    expect((await s.acquire({ roomId, memberId: members[0]! }, () => undefined)).ok).toBe(true);
+    expect((await s.acquire({ roomId, participantId: members[0]! }, () => undefined)).ok).toBe(
+      true,
+    );
     expect(await rows(roomId)).toBe(6); // 5 + 1(다른 멤버)
   });
 
@@ -86,10 +90,12 @@ describe('임대 한도·갱신·정리 (실제 PostgreSQL, 짧은 TTL=3초)', (
     const s = svc();
     for (let m = 0; m < 10; m++) {
       for (let i = 0; i < 5; i++)
-        expect((await s.acquire({ roomId, memberId: members[m]! }, () => undefined)).ok).toBe(true);
+        expect((await s.acquire({ roomId, participantId: members[m]! }, () => undefined)).ok).toBe(
+          true,
+        );
     }
     expect(await rows(roomId)).toBe(50);
-    expect(await s.acquire({ roomId, memberId: members[10]! }, () => undefined)).toEqual({
+    expect(await s.acquire({ roomId, participantId: members[10]! }, () => undefined)).toEqual({
       ok: false,
       reason: 'limit',
     });
@@ -101,7 +107,7 @@ describe('임대 한도·갱신·정리 (실제 PostgreSQL, 짧은 TTL=3초)', (
     const b = svc();
     const results = await Promise.all(
       Array.from({ length: 12 }, (_, i) =>
-        (i % 2 ? a : b).acquire({ roomId, memberId: members[0]! }, () => undefined),
+        (i % 2 ? a : b).acquire({ roomId, participantId: members[0]! }, () => undefined),
       ),
     );
     expect(results.filter((r) => r.ok)).toHaveLength(5);
@@ -113,24 +119,26 @@ describe('임대 한도·갱신·정리 (실제 PostgreSQL, 짧은 TTL=3초)', (
     const { roomId, members } = await room(1);
     const crashed = svc();
     for (let i = 0; i < 5; i++)
-      await crashed.acquire({ roomId, memberId: members[0]! }, () => undefined);
+      await crashed.acquire({ roomId, participantId: members[0]! }, () => undefined);
     // 프로세스가 갑자기 죽은 상황: 반납도 갱신도 없다(타이머만 멈춘다)
     (crashed as unknown as { stopTimers(): void }).stopTimers();
     (crashed as unknown as { local: Map<string, unknown> }).local.clear();
     const other = svc();
-    expect(await other.acquire({ roomId, memberId: members[0]! }, () => undefined)).toEqual({
+    expect(await other.acquire({ roomId, participantId: members[0]! }, () => undefined)).toEqual({
       ok: false,
       reason: 'limit',
     }); // 아직 만료 전
     await sleep(TTL + 300);
-    expect((await other.acquire({ roomId, memberId: members[0]! }, () => undefined)).ok).toBe(true); // T 안에 정리되어 슬롯이 돌아왔다
+    expect((await other.acquire({ roomId, participantId: members[0]! }, () => undefined)).ok).toBe(
+      true,
+    ); // T 안에 정리되어 슬롯이 돌아왔다
     expect(await rows(roomId)).toBe(1);
   });
 
   it('갱신: 살아 있는 연결은 TTL을 넘겨서도 유지되고 DB 만료가 계속 미래다', async () => {
     const { roomId, members } = await room(1);
     const s = svc();
-    const r = await s.acquire({ roomId, memberId: members[0]! }, () => undefined);
+    const r = await s.acquire({ roomId, participantId: members[0]! }, () => undefined);
     if (!r.ok) throw new Error('임대 실패');
     await sleep(TTL * 2 + 500);
     expect(r.lease.alive()).toBe(true);
@@ -148,7 +156,7 @@ describe('임대 한도·갱신·정리 (실제 PostgreSQL, 짧은 TTL=3초)', (
     const t0 = Date.now();
     const leases = [];
     for (let i = 0; i < 5; i++) {
-      const r = await a.acquire({ roomId, memberId: members[0]! }, () => {
+      const r = await a.acquire({ roomId, participantId: members[0]! }, () => {
         closedAt ||= Date.now();
       });
       if (r.ok) leases.push(r.lease);
@@ -163,7 +171,7 @@ describe('임대 한도·갱신·정리 (실제 PostgreSQL, 짧은 TTL=3초)', (
       const b = svc();
       // 만료 전(약 1.5초): 아직 DB에는 5개가 남아 있어 새 연결은 거부된다
       await sleep(1_200);
-      expect(await b.acquire({ roomId, memberId: members[0]! }, () => undefined)).toEqual({
+      expect(await b.acquire({ roomId, participantId: members[0]! }, () => undefined)).toEqual({
         ok: false,
         reason: 'limit',
       });
@@ -186,7 +194,7 @@ describe('임대 한도·갱신·정리 (실제 PostgreSQL, 짧은 TTL=3초)', (
     const { roomId, members } = await room(1);
     const s = svc();
     let lost = false;
-    const r = await s.acquire({ roomId, memberId: members[0]! }, () => (lost = true));
+    const r = await s.acquire({ roomId, participantId: members[0]! }, () => (lost = true));
     if (!r.ok) throw new Error('임대 실패');
     await db.query(`DELETE FROM "StreamLease" WHERE "id"=$1`, [r.lease.id]);
     await vi.waitFor(() => expect(lost).toBe(true), { timeout: 3_000, interval: 50 });
@@ -196,7 +204,8 @@ describe('임대 한도·갱신·정리 (실제 PostgreSQL, 짧은 TTL=3초)', (
   it('우아한 종료: onModuleDestroy가 이 인스턴스의 임대를 모두 반납한다', async () => {
     const { roomId, members } = await room(1);
     const s = svc();
-    for (let i = 0; i < 3; i++) await s.acquire({ roomId, memberId: members[0]! }, () => undefined);
+    for (let i = 0; i < 3; i++)
+      await s.acquire({ roomId, participantId: members[0]! }, () => undefined);
     expect(await rows(roomId)).toBe(3);
     await s.onModuleDestroy();
     expect(await rows(roomId)).toBe(0);
@@ -250,7 +259,7 @@ describe('마감은 요청 송신 시각 기준이다 (가짜 시계·가짜 DB,
   }
 
   const lease = async (f: ReturnType<typeof fixture>, onLost: () => void = () => undefined) => {
-    const r = await f.s.acquire({ roomId: 'r', memberId: 'm' }, onLost);
+    const r = await f.s.acquire({ roomId: 'r', participantId: 'm' }, onLost);
     if (!r.ok) throw new Error(`임대 실패 ${r.reason}`);
     return r.lease;
   };
@@ -270,13 +279,13 @@ describe('마감은 요청 송신 시각 기준이다 (가짜 시계·가짜 DB,
 
   it('최초 임대 응답 지연: 응답이 마감(송신+2T/3) 뒤에 도착하면 연결을 열지 않고 임대를 반납한다(늦은 응답 폐기)', async () => {
     const f = fixture({ txDelay: SELF + 500 });
-    const r = await f.s.acquire({ roomId: 'r', memberId: 'm' }, () => undefined);
+    const r = await f.s.acquire({ roomId: 'r', participantId: 'm' }, () => undefined);
     expect(r).toEqual({ ok: false, reason: 'late' });
     expect(f.calls).toContain('delete');
     expect(f.s.localCount).toBe(0);
     // 마감 직전에 도착한 응답은 받아들인다
     const g = fixture({ txDelay: SELF - 1 });
-    expect((await g.s.acquire({ roomId: 'r', memberId: 'm' }, () => undefined)).ok).toBe(true);
+    expect((await g.s.acquire({ roomId: 'r', participantId: 'm' }, () => undefined)).ok).toBe(true);
     await g.s.onModuleDestroy();
   });
 
