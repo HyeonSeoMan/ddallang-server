@@ -71,10 +71,9 @@ describe('S1 §4.8 존재하지 않는 동작', () => {
       ]) {
         expectApiError(await call('post', path, c.key).send({}), 404, 'ROUTE_NOT_FOUND');
       }
-      expect(
-        (await s.http.get(`/rooms/${c.roomId}/participants`).set(auth(c.key))).body.participants[0]
-          .nickname,
-      ).toBe('Kim');
+      const list = (await s.http.get(`/rooms/${c.roomId}/participants`).set(auth(c.key))).body
+        .participants as { id: string; nickname: string }[];
+      expect(list.find((x) => x.id === p.id)!.nickname).toBe('Kim');
     },
   );
 
@@ -89,9 +88,9 @@ describe('S1 §4.8 존재하지 않는 동작', () => {
 
   it(
     ac(
-      ['AC-ROOM-007-3', 'AC-ROOM-004-5'],
+      ['AC-ROOM-007-3', 'AC-ROOM-004-4'],
       'S1 §4.8',
-      'RoomMember 수정·삭제·강제 퇴장, 방장 이전, 초대 링크 재발급, RoomMember–Participant 연결·해제 경로는 404 ROUTE_NOT_FOUND',
+      '강제 퇴장, 방장 이전, 초대 링크 재발급, 이어받기 밖의 신원 연결·해제·이동, 이어받기 요청 수정 경로는 404 ROUTE_NOT_FOUND',
     ),
     async () => {
       const c = await createRoom(s.http);
@@ -110,7 +109,16 @@ describe('S1 §4.8 존재하지 않는 동작', () => {
         ['put', `/invites/${c.inviteCode}`],
         ['post', `/rooms/${c.roomId}/participants/${p.id}/link`],
         ['delete', `/rooms/${c.roomId}/participants/${p.id}/link`],
+        ['post', `/rooms/${c.roomId}/participants/${p.id}/identity`],
+        ['delete', `/rooms/${c.roomId}/participants/${p.id}/identity`],
+        ['post', `/rooms/${c.roomId}/participants/${p.id}/unlink`],
+        ['post', `/rooms/${c.roomId}/participants/${p.id}/move`],
+        ['post', `/rooms/${c.roomId}/participants/${p.id}/kick`],
         ['post', `/rooms/${c.roomId}/members/${member.res.body.me.id}/participant`],
+        ['post', `/rooms/${c.roomId}/identity`],
+        ['post', `/invites/${c.inviteCode}/identity`],
+        ['post', `/invites/${c.inviteCode}/claims/x/update`],
+        ['post', `/rooms/${c.roomId}/claims/x/edit`],
       ];
       for (const [m, path] of undefinedRoutes) {
         for (const key of [c.key, member.key, undefined]) {
@@ -143,34 +151,29 @@ describe('S1 §4.8 존재하지 않는 동작', () => {
 
 describe('S1 불변식 (계약 시험)', () => {
   it(
-    ac(['AC-ROOM-004-3'], 'S1 §6.1', '입장은 Participant를 만들지 않는다(참여자 수 불변)'),
+    ac(
+      ['AC-ROOM-004-1'],
+      'S1 §2.3 I2',
+      '방 생성·입장은 참여자를 1명씩 만들고 직접 추가도 1명, 복원은 0명. 사람 단위는 참여자 하나다',
+    ),
     async () => {
       const c = await createRoom(s.http);
+      expect(await count(s.db, 'Participant', c.roomId)).toBe(1);
+      const kim = await join(s.http, c.inviteCode, 'Kim');
+      expect(await count(s.db, 'Participant', c.roomId)).toBe(2);
       await addParticipant(s.http, c, 'P1');
-      const before = await count(s.db, 'Participant', c.roomId);
-      await join(s.http, c.inviteCode, 'Kim');
-      await join(s.http, c.inviteCode, 'Lee');
-      expect(await count(s.db, 'Participant', c.roomId)).toBe(before);
-    },
-  );
-
-  it(
-    ac(['AC-ROOM-004-4'], 'S1 §6.1', '참여자 등록은 RoomMember를 만들지 않는다(멤버 수 불변)'),
-    async () => {
-      const c = await createRoom(s.http);
-      await join(s.http, c.inviteCode, 'Kim');
-      const before = await count(s.db, 'RoomMember', c.roomId);
-      await addParticipant(s.http, c, 'P1');
-      await addParticipant(s.http, c, 'P2');
-      expect(await count(s.db, 'RoomMember', c.roomId)).toBe(before);
+      expect(await count(s.db, 'Participant', c.roomId)).toBe(3);
+      await join(s.http, c.inviteCode, 'x', kim.key);
+      await join(s.http, c.inviteCode, 'x', c.key);
+      expect(await count(s.db, 'Participant', c.roomId)).toBe(3);
     },
   );
 
   it(
     ac(
       ['AC-PART-003-3'],
-      'S1 §5.3',
-      '오입력 참여자를 비활성화한 뒤 다른 닉네임으로 새 참여자를 등록할 수 있다(옛 닉네임은 계속 점유)',
+      'S1 §6.2',
+      '오입력 참여자를 비활성화한 뒤 다른 닉네임으로 새 참여자를 직접 추가·입장할 수 있다(옛 닉네임은 계속 점유)',
     ),
     async () => {
       const c = await createRoom(s.http);
@@ -181,23 +184,36 @@ describe('S1 불변식 (계약 시험)', () => {
         .send({ status: 'INACTIVE' });
       const fixed = await addParticipant(s.http, c, 'Kim');
       expect(fixed.status).toBe(201);
-      expect(fixed.body.participant.order).toBe(2);
+      expect(fixed.body.participant.order).toBe(3);
+      const joined = await join(s.http, c.inviteCode, 'Lee');
+      expect(joined.res.status).toBe(201);
       expectApiError(await addParticipant(s.http, c, 'kimm'), 409, 'NICKNAME_TAKEN'); // 비활성도 점유
+      expectApiError((await join(s.http, c.inviteCode, 'KIMM')).res, 409, 'NICKNAME_TAKEN');
       const list = (await s.http.get(`/rooms/${c.roomId}/participants`).set(auth(c.key))).body
         .participants;
       expect(
         list.map((p: { nickname: string; status: string }) => `${p.nickname}:${p.status}`),
-      ).toEqual(['Kimm:INACTIVE', 'Kim:ACTIVE']);
+      ).toEqual(['Host:ACTIVE', 'Kimm:INACTIVE', 'Kim:ACTIVE', 'Lee:ACTIVE']);
     },
   );
 
-  it('방장은 방 생성자뿐이다: 입장자는 어떤 순서로 들어와도 isHost=false이고 방장 변경 경로가 없다', async () => {
-    const c = await createRoom(s.http);
-    for (let i = 0; i < 4; i++)
-      expect((await join(s.http, c.inviteCode, `m${i}`)).res.body.me.isHost).toBe(false);
-    const hosts = await s.db.query(`SELECT "id" FROM "RoomMember" WHERE "roomId"=$1 AND "isHost"`, [
-      c.roomId,
-    ]);
-    expect(hosts).toEqual([{ id: c.hostId }]);
-  });
+  it(
+    ac(
+      ['AC-ROOM-007-1'],
+      'S1 §2.3 I1',
+      '방장은 방 생성자뿐이다: 입장자·직접 추가는 어떤 순서로 와도 isHost=false이고 방장 변경 경로가 없다',
+    ),
+    async () => {
+      const c = await createRoom(s.http);
+      for (let i = 0; i < 4; i++) {
+        expect((await join(s.http, c.inviteCode, `m${i}`)).res.body.me.isHost).toBe(false);
+        expect((await addParticipant(s.http, c, `d${i}`)).body.participant.isHost).toBe(false);
+      }
+      const hosts = await s.db.query(
+        `SELECT "id" FROM "Participant" WHERE "roomId"=$1 AND "isHost"`,
+        [c.roomId],
+      );
+      expect(hosts).toEqual([{ id: c.hostId }]);
+    },
+  );
 });

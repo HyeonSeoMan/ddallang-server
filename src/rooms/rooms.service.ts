@@ -1,8 +1,16 @@
 import { Injectable } from '@nestjs/common';
+import { resolveIdentity, type IdentityState } from '../common/auth/identity.js';
 import { DatabaseService } from '../common/db/database.service.js';
 import { PrismaService } from '../common/db/prisma.service.js';
-import { toMemberDto, toRoomDto, type RoomDto, type RoomMemberDto } from '../common/domain/dto.js';
-import { MEMBER_LIMIT } from '../common/domain/limits.js';
+import { createParticipant } from '../common/domain/participants.js';
+import {
+  toMyClaimDto,
+  toParticipantDto,
+  toRoomDto,
+  type MyClaimDto,
+  type ParticipantDto,
+  type RoomDto,
+} from '../common/domain/dto.js';
 import { ApiError } from '../common/errors/api-error.js';
 import {
   asObject,
@@ -13,13 +21,39 @@ import {
 import { requireJsonBody, type BodyInput } from '../common/http/json-body.js';
 import { newId, newInviteCode } from '../common/ids/ids.js';
 import { nicknameKey } from '../common/validation/index.js';
+import { latestClaimOf } from './claim-queries.js';
+
+export type RoomSummary = Pick<RoomDto, 'id' | 'name' | 'unit' | 'status'>;
 
 export interface JoinResult {
-  /** 새 RoomMember를 만들었으면 true(201), 같은 키로 복원했으면 false(200) */
+  /** 새 참여자를 만들었으면 true(201), 같은 키로 복원했으면 false(200) */
   created: boolean;
-  room: Pick<RoomDto, 'id' | 'name' | 'unit' | 'status'>;
-  me: RoomMemberDto;
+  room: RoomSummary;
+  me: ParticipantDto;
 }
+
+/** 초대 조회의 신원 상태(S1 §4.2). LINKED는 `PARTICIPANT`로 알린다. */
+export type InviteIdentity = 'NONE' | 'PARTICIPANT' | 'PENDING' | 'REVOKED';
+
+export interface InviteView {
+  room: Pick<RoomDto, 'name' | 'unit' | 'status'>;
+  identity: InviteIdentity;
+  claim: MyClaimDto | null;
+  claimableNicknames: string[];
+}
+
+/** 입장의 `NICKNAME_TAKEN`·`PARTICIPANT_LIMIT_EXCEEDED`는 이어받기를 안내한다(S1 §4.3, AC-ROOM-002-6, 008-8). */
+const JOIN_NICKNAME_TAKEN =
+  '이미 사용 중인 닉네임입니다. 이 방의 기존 참여자라면 그 닉네임으로 이어받기를 요청할 수 있습니다.';
+const JOIN_LIMIT_EXCEEDED =
+  '참여자가 가득 찼습니다. 이 방의 기존 참여자라면 이어받기를 요청할 수 있습니다.';
+
+const INVITE_IDENTITY: Record<IdentityState['kind'], InviteIdentity> = {
+  LINKED: 'PARTICIPANT',
+  PENDING: 'PENDING',
+  REVOKED: 'REVOKED',
+  NONE: 'NONE',
+};
 
 @Injectable()
 export class RoomsService {
@@ -28,11 +62,14 @@ export class RoomsService {
     private readonly db: DatabaseService,
   ) {}
 
-  /** S1 §4.1: 방, 최초 RoomMember(방장), 초대 코드를 한 트랜잭션에서 만든다. 검증이 하나라도 실패하면 아무것도 만들지 않는다. */
+  /**
+   * S1 §4.1: 방과 첫 참여자(방장, `order = 1`, 이 키에 연결)를 한 트랜잭션에서 만든다. 검증이 하나라도 실패하면
+   * 아무것도 만들지 않는다. 새 방이므로 연결된 스트림이 없고 `revision`을 소비하지 않는다.
+   */
   async createRoom(
     identityKeyHash: string,
     input: BodyInput,
-  ): Promise<{ room: RoomDto; me: RoomMemberDto }> {
+  ): Promise<{ room: RoomDto; me: ParticipantDto }> {
     const body = asObject(requireJsonBody(input)); // 7번: 본문 파싱 실패는 검증 차례에 422
     const details: FieldDetail[] = [];
     const name = strictTextField(body, 'name', details);
@@ -46,104 +83,100 @@ export class RoomsService {
         name: name!,
         unit: unit!,
         inviteCode: newInviteCode(),
-        members: {
+        participants: {
           create: {
             id: newId(),
             nickname: nickname!,
             nicknameKey: nicknameKey(nickname!),
+            order: 1,
             isHost: true,
             identityKeyHash,
           },
         },
       },
-      include: { members: true },
+      include: { participants: true },
     });
-    return { room: toRoomDto(room), me: toMemberDto(room.members[0]!) };
-  }
-
-  /** S1 §4.2: 입장 전에 공개하는 것은 이름·정산 단위·진행 상태와 `isMember`뿐이다. */
-  async getInvite(
-    inviteCode: string,
-    identityKeyHash: string | undefined,
-  ): Promise<{ room: Pick<RoomDto, 'name' | 'unit' | 'status'>; isMember: boolean }> {
-    const room = await this.prisma.client.room.findUnique({
-      where: { inviteCode },
-      select: { id: true, name: true, unit: true, status: true },
-    });
-    if (!room) throw new ApiError('INVITE_NOT_FOUND');
-    let isMember = false;
-    if (identityKeyHash) {
-      const member = await this.prisma.client.roomMember.findUnique({
-        where: { roomId_identityKeyHash: { roomId: room.id, identityKeyHash } },
-        select: { id: true },
-      });
-      isMember = member !== null;
-    }
-    return { room: { name: room.name, unit: room.unit, status: room.status }, isMember };
+    return { room: toRoomDto(room), me: toParticipantDto(room.participants[0]!) };
   }
 
   /**
-   * S1 §4.3: 같은 키의 RoomMember가 있으면 복원(닉네임·한도 검사 없음), 없으면 §3.3의 7(검증)→8(닉네임 중복)→9(한도)
-   * 순서로 판정해 새로 만든다. 판정과 삽입은 방 잠금 안의 한 트랜잭션이라 마지막 슬롯·같은 닉네임·같은 키의
-   * 동시 요청에서도 정확히 하나만 만들어진다. 입장은 `revision`·이벤트를 만들지 않는다(N-5).
+   * S1 §4.2: 입장 전에 공개하는 것은 이름·정산 단위·진행 상태, 자기 신원 상태와 최근 이어받기 요청, 이어받기 후보
+   * 닉네임뿐이다. 후보는 방장을 뺀 모든 참여자(활성·비활성, 신원 연결 여부 무관)를 `order` 순으로, 신원이 없음·접근
+   * 상실일 때만 채운다. 한 스냅샷에서 읽는다. 이 경로는 접근 상실을 401로 거부하지 않고 `REVOKED`로 알린다.
    */
-  async join(inviteCode: string, identityKeyHash: string, input: BodyInput): Promise<JoinResult> {
-    const room = await this.prisma.client.room.findUnique({
-      where: { inviteCode },
-      select: { id: true, name: true, unit: true, status: true },
-    });
-    if (!room) throw new ApiError('INVITE_NOT_FOUND');
-    const roomDto = { id: room.id, name: room.name, unit: room.unit, status: room.status };
-
-    const existing = await this.prisma.client.roomMember.findUnique({
-      where: { roomId_identityKeyHash: { roomId: room.id, identityKeyHash } },
-    });
-    if (existing) return { created: false, room: roomDto, me: toMemberDto(existing) };
-
-    return this.db.withRoomLock(room.id, async (tx) => {
-      // 방 상태는 잠금 안에서 다시 읽는다(응답이 커밋 시점과 같은 상태를 말하도록).
-      const locked = await tx.room.findUniqueOrThrow({
-        where: { id: room.id },
-        select: { status: true },
+  async getInvite(inviteCode: string, identityKeyHash: string | undefined): Promise<InviteView> {
+    return this.db.readSnapshot(async (tx) => {
+      const room = await tx.room.findUnique({
+        where: { inviteCode },
+        select: { id: true, name: true, unit: true, status: true },
       });
-      const lockedRoom = { ...roomDto, status: locked.status };
-      // 같은 키의 동시 입장: 먼저 잠금을 얻은 요청이 만들었으면 나머지는 같은 RoomMember를 복원한다.
-      // 복원 판정이 검증(7번)보다 앞서므로 검증은 이 재확인 뒤에 한다(S1 §3.3, §4.3).
-      const again = await tx.roomMember.findUnique({
-        where: { roomId_identityKeyHash: { roomId: room.id, identityKeyHash } },
-      });
-      if (again) return { created: false, room: lockedRoom, me: toMemberDto(again) };
-
-      const body = asObject(requireJsonBody(input));
-      const details: FieldDetail[] = [];
-      const nickname = strictTextField(body, 'nickname', details);
-      throwIfInvalid(details);
-
-      const key = nicknameKey(nickname!);
-      const taken = await tx.roomMember.findUnique({
-        where: { roomId_nicknameKey: { roomId: room.id, nicknameKey: key } },
-        select: { id: true },
-      });
-      if (taken) throw new ApiError('NICKNAME_TAKEN'); // 8번이 9번보다 앞이다
-      const count = await tx.roomMember.count({ where: { roomId: room.id } });
-      if (count >= MEMBER_LIMIT) {
-        throw new ApiError('MEMBER_LIMIT_EXCEEDED', { details: [{ limit: MEMBER_LIMIT }] });
-      }
-      const member = await tx.roomMember.create({
-        data: {
-          id: newId(),
-          roomId: room.id,
-          nickname: nickname!,
-          nicknameKey: key,
-          isHost: false,
-          identityKeyHash,
-        },
-      });
-      return { created: true, room: lockedRoom, me: toMemberDto(member) };
+      if (!room) throw new ApiError('INVITE_NOT_FOUND');
+      const state: IdentityState = identityKeyHash
+        ? await resolveIdentity(tx, room.id, identityKeyHash)
+        : { kind: 'NONE' };
+      const claim = identityKeyHash ? await latestClaimOf(tx, room.id, identityKeyHash) : null;
+      const showCandidates = state.kind === 'NONE' || state.kind === 'REVOKED';
+      const candidates = showCandidates
+        ? await tx.participant.findMany({
+            where: { roomId: room.id, isHost: false },
+            orderBy: { order: 'asc' },
+            select: { nickname: true },
+          })
+        : [];
+      return {
+        room: { name: room.name, unit: room.unit, status: room.status },
+        identity: INVITE_IDENTITY[state.kind],
+        claim: claim ? toMyClaimDto(claim) : null,
+        claimableNicknames: candidates.map((c) => c.nickname),
+      };
     });
   }
 
-  /** S1 §4.4. 방 존재·멤버 여부는 가드가 이미 판정했다. */
+  /**
+   * S1 §4.3: 키의 이 방 상태로 분기한다. 판정과 변경을 모두 방 잠금 안에서 하고 잠금을 얻은 뒤 상태를 다시 읽는다
+   * (PD-24). LINKED는 복원(200, 닉네임·게임 상태·한도 검사 없음, 이벤트 없음), REVOKED는 401, PENDING은
+   * `CLAIM_PENDING`, NONE은 새 참여자다: 종료(5) → 검증(7) → 닉네임 중복(8) → 한도(9) 순서이며 `participant.created`
+   * 로 `revision`을 소비한다. 같은 키·같은 닉네임·마지막 슬롯의 동시 요청에서도 정확히 하나만 만들어진다.
+   */
+  async join(inviteCode: string, identityKeyHash: string, input: BodyInput): Promise<JoinResult> {
+    const found = await this.prisma.client.room.findUnique({
+      where: { inviteCode },
+      select: { id: true },
+    });
+    if (!found) throw new ApiError('INVITE_NOT_FOUND');
+    const roomId = found.id;
+
+    const { value } = await this.db.withRoomMutation<JoinResult>(roomId, async (tx) => {
+      const room = await tx.room.findUniqueOrThrow({
+        where: { id: roomId },
+        select: { id: true, name: true, unit: true, status: true },
+      });
+      const state = await resolveIdentity(tx, roomId, identityKeyHash);
+      if (state.kind === 'LINKED') {
+        return { value: { created: false, room, me: toParticipantDto(state.participant) } };
+      }
+      if (state.kind === 'REVOKED') throw new ApiError('IDENTITY_REVOKED');
+      if (state.kind === 'PENDING') throw new ApiError('CLAIM_PENDING');
+
+      if (room.status === 'ENDED') throw new ApiError('GAME_ENDED'); // 5번(OQ-043)
+      const body = asObject(requireJsonBody(input)); // 7번
+      const details: FieldDetail[] = [];
+      const nickname = strictTextField(body, 'nickname', details);
+      throwIfInvalid(details);
+      const participant = await createParticipant(tx, roomId, nickname!, {
+        identityKeyHash,
+        nicknameTakenMessage: JOIN_NICKNAME_TAKEN,
+        limitMessage: JOIN_LIMIT_EXCEEDED,
+      });
+      return {
+        value: { created: true, room, me: toParticipantDto(participant) },
+        event: { event: 'participant.created', participantId: participant.id },
+      };
+    });
+    return value;
+  }
+
+  /** S1 §4.4. 방 존재·요청자는 가드가 이미 판정했다. */
   async getRoom(roomId: string): Promise<RoomDto> {
     const room = await this.prisma.client.room.findUnique({ where: { id: roomId } });
     if (!room) throw new ApiError('ROOM_NOT_FOUND');

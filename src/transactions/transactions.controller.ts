@@ -12,10 +12,10 @@ import {
 import { ApiBody, ApiHeader, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import {
-  CurrentMember,
-  RoomMemberGuard,
-  type RoomMemberContext,
-} from '../common/auth/room-member.guard.js';
+  CurrentRequester,
+  ParticipantGuard,
+  type RequesterContext,
+} from '../common/auth/participant.guard.js';
 import { JsonBody, type BodyInput } from '../common/http/json-body.js';
 import { ApiErrors, ApiIdentityKey, ApiRoomIdParam } from '../common/swagger-docs.js';
 import { TRANSACTION_SCHEMA, obj } from '../common/swagger-schemas.js';
@@ -37,8 +37,12 @@ const apply =
     for (const d of decorators) d(target, key, descriptor);
   };
 
-function requester(m: RoomMemberContext): Requester {
-  return { memberId: m.memberId, roomId: m.roomId, isHost: m.isHost };
+function requesterOf(r: RequesterContext): Requester {
+  return {
+    participantId: r.participant.id,
+    roomId: r.participant.roomId,
+    isHost: r.participant.isHost,
+  };
 }
 
 /** 재전송이면 `Idempotent-Replayed: true`를 더하고 저장된 상태 코드·본문을 그대로 돌려준다(S2 §5.3). */
@@ -50,7 +54,7 @@ function send(res: Response, reply: Reply): unknown {
 
 @ApiTags('transactions')
 @Controller('rooms/:roomId/transactions')
-@UseGuards(RoomMemberGuard)
+@UseGuards(ParticipantGuard)
 @ApiIdentityKey()
 @ApiRoomIdParam()
 export class TransactionsController {
@@ -102,12 +106,12 @@ export class TransactionsController {
     'TRANSACTION_LIMIT_EXCEEDED',
   )
   async create(
-    @CurrentMember() member: RoomMemberContext,
+    @CurrentRequester() requester: RequesterContext,
     @Headers() headers: Headers_,
     @JsonBody() body: BodyInput,
     @Res({ passthrough: true }) res: Response,
   ): Promise<unknown> {
-    return send(res, await this.transactions.create(requester(member), headers, body));
+    return send(res, await this.transactions.create(requesterOf(requester), headers, body));
   }
 
   @Put(':transactionId')
@@ -150,7 +154,7 @@ export class TransactionsController {
     'TRANSACTION_DELETED',
   )
   async update(
-    @CurrentMember() member: RoomMemberContext,
+    @CurrentRequester() requester: RequesterContext,
     @Param('transactionId') transactionId: string,
     @Headers() headers: Headers_,
     @JsonBody() body: BodyInput,
@@ -158,7 +162,7 @@ export class TransactionsController {
   ): Promise<unknown> {
     return send(
       res,
-      await this.transactions.update(requester(member), transactionId, headers, body),
+      await this.transactions.update(requesterOf(requester), transactionId, headers, body),
     );
   }
 
@@ -191,11 +195,14 @@ export class TransactionsController {
     'TRANSACTION_DELETED',
   )
   async remove(
-    @CurrentMember() member: RoomMemberContext,
+    @CurrentRequester() requester: RequesterContext,
     @Param('transactionId') transactionId: string,
     @Headers() headers: Headers_,
     @Res({ passthrough: true }) res: Response,
   ): Promise<unknown> {
-    return send(res, await this.transactions.remove(requester(member), transactionId, headers));
+    return send(
+      res,
+      await this.transactions.remove(requesterOf(requester), transactionId, headers),
+    );
   }
 }

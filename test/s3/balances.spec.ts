@@ -44,7 +44,8 @@ describe('GET /rooms/{roomId}/balances (S3 §4.2, §6.1)', () => {
     const r = await setupRoom(s.http);
     await pay(r, r.p.a, r.p.b, 100);
     const b = Object.fromEntries((await bal(r)).map((x) => [x.participantId, x.balance]));
-    expect(b).toEqual({ [r.p.a]: -100, [r.p.b]: 100, [r.p.c]: 0 });
+    // 방장도 참여자다(순손익 0, S1 §2.3 I2)
+    expect(b).toEqual({ [r.c.hostId]: 0, [r.p.a]: -100, [r.p.b]: 100, [r.p.c]: 0 });
   });
 
   it(
@@ -59,11 +60,12 @@ describe('GET /rooms/{roomId}/balances (S3 §4.2, §6.1)', () => {
       await pay(r, r.p.c, r.p.b, 100);
       const res = await get(r);
       expect(res.body.balances.map((x: { balance: number }) => x.balance)).toEqual([
-        300, 100, -400,
+        300, 100, 0, -400,
       ]);
       expect(res.body.balances.map((x: { participantId: string }) => x.participantId)).toEqual([
         r.p.a,
         r.p.b,
+        r.c.hostId, // 거래 없는 방장(0)
         r.p.c,
       ]);
       expect(Object.keys(res.body)).toEqual(['balances']);
@@ -87,21 +89,18 @@ describe('GET /rooms/{roomId}/balances (S3 §4.2, §6.1)', () => {
     ),
     async () => {
       const r = await setupRoom(s.http);
-      const d = (await addParticipant(s.http, r.c, 'Dd')).body.participant.id as string; // order 4, 거래 없음
-      await pay(r, r.p.c, r.p.b, 100); // B +100 (order 2)
-      await pay(r, r.p.c, r.p.a, 100); // A +100 (order 1)
+      const d = (await addParticipant(s.http, r.c, 'Dd')).body.participant.id as string; // order 5, 거래 없음
+      await pay(r, r.p.c, r.p.b, 100); // B +100 (order 3)
+      await pay(r, r.p.c, r.p.a, 100); // A +100 (order 2)
       await pay(r, r.p.c, r.p.b, 100); // C -300 total
       const rows = await bal(r);
-      expect(rows.map((x) => [x.participantId, x.balance])).toEqual(
-        [
-          [r.p.a, 100],
-          [r.p.b, 200],
-          [r.p.c, -300],
-          [d, 0],
-        ]
-          .sort((a, b) => (b[1] as number) - (a[1] as number))
-          .map((x) => x),
-      );
+      expect(rows.map((x) => [x.participantId, x.balance])).toEqual([
+        [r.p.b, 200],
+        [r.p.a, 100],
+        [r.c.hostId, 0], // 0 동률은 order(방장 1 < D 5)
+        [d, 0],
+        [r.p.c, -300],
+      ]);
       // 동률 확인: A와 B를 +100으로 맞춘 새 방
       const r2 = await setupRoom(s.http);
       const d2 = (await addParticipant(s.http, r2.c, 'Dd')).body.participant.id as string;
@@ -111,9 +110,10 @@ describe('GET /rooms/{roomId}/balances (S3 §4.2, §6.1)', () => {
       expect(rows2.map((x) => [x.participantId, x.balance])).toEqual([
         [r2.p.a, 100],
         [r2.p.b, 100],
+        [r2.c.hostId, 0],
         [d2, 0],
         [r2.p.c, -200],
-      ]); // 동률은 order(A=1, B=2), 0이 가운데
+      ]); // 동률은 order(방장 1, A 2, B 3, D 5), 0이 가운데
     },
   );
 
@@ -169,12 +169,16 @@ describe('GET /rooms/{roomId}/balances (S3 §4.2, §6.1)', () => {
     },
   );
 
-  it('참여자가 없거나 거래가 없으면 모두 0이거나 빈 목록이다', async () => {
+  it('거래가 없으면 모든 참여자(방금 만든 방은 방장 1명)가 0이다', async () => {
     const c = await (await import('../s1/s1-helpers.js')).createRoom(s.http);
-    const empty = await s.http.get(`/rooms/${c.roomId}/balances`).set(auth(c.key));
-    expect(empty.body).toEqual({ balances: [] });
+    const only = await s.http.get(`/rooms/${c.roomId}/balances`).set(auth(c.key));
+    expect(only.body).toEqual({
+      balances: [
+        { participantId: c.hostId, nickname: 'Host', status: 'ACTIVE', order: 1, balance: 0 },
+      ],
+    });
     const r = await setupRoom(s.http);
-    expect((await bal(r)).map((x) => x.balance)).toEqual([0, 0, 0]);
+    expect((await bal(r)).map((x) => x.balance)).toEqual([0, 0, 0, 0]);
   });
 
   it(

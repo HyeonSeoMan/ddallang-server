@@ -203,8 +203,18 @@ describe('Swagger 문서 검수 항목 (회귀 방지)', () => {
       'TRANSACTION_LIMIT_EXCEEDED',
     ]);
     expect(codesOf('/invites/{inviteCode}/members', 'post', '409').sort()).toEqual([
-      'MEMBER_LIMIT_EXCEEDED',
+      'CLAIM_PENDING',
+      'GAME_ENDED',
       'NICKNAME_TAKEN',
+      'PARTICIPANT_LIMIT_EXCEEDED',
+    ]);
+    expect(codesOf('/invites/{inviteCode}/members', 'post', '401').sort()).toEqual([
+      'IDENTITY_REVOKED',
+      'UNAUTHENTICATED',
+    ]);
+    expect(codesOf('/rooms/{roomId}/participants/{participantId}', 'patch', '409').sort()).toEqual([
+      'GAME_ENDED',
+      'HOST_CANNOT_BE_DEACTIVATED',
     ]);
     expect(d.paths['/rooms/{roomId}/balances'].get.responses['409']).toBeUndefined(); // 조회에는 상태·한도 오류가 없다(S3 §3.3)
     expect(d.paths['/rooms/{roomId}/balances'].get.responses['403']).toBeUndefined();

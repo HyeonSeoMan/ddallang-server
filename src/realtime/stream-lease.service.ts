@@ -3,7 +3,7 @@ import { performance } from 'node:perf_hooks';
 import { PrismaService } from '../common/db/prisma.service.js';
 import { newId } from '../common/ids/ids.js';
 
-/** S5 §4.1 E-9: 한 RoomMember당 동시 스트림 5개, 방당 50개(서버 인스턴스 전체 합산, 사용자 결정 D1). */
+/** S5 §4.1 E-9: 한 참여자당 동시 스트림 5개, 방당 50개(서버 인스턴스 전체 합산, 사용자 결정 D1). */
 export const MEMBER_STREAM_LIMIT = 5;
 export const ROOM_STREAM_LIMIT = 50;
 /** 임대 만료 T = 15초(사용자 결정 D2). */
@@ -76,7 +76,7 @@ export class StreamLeaseService implements OnModuleDestroy {
    * (임대를 반납했고 연결을 열지 않는다). `onLost`는 임대를 잃었을 때(갱신 안 됨·마감) 스트림을 닫는 콜백이다.
    */
   async acquire(
-    input: { roomId: string; memberId: string },
+    input: { roomId: string; participantId: string },
     onLost: () => void,
   ): Promise<AcquireResult> {
     const sentAt = this.now(); // 요청 송신 시각(단조)
@@ -86,7 +86,7 @@ export class StreamLeaseService implements OnModuleDestroy {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`stream-lease:${input.roomId}`}, 0))`;
         await tx.$executeRaw`DELETE FROM "StreamLease" WHERE "roomId" = ${input.roomId} AND "expiresAt" <= clock_timestamp()`;
         const rows = await tx.$queryRaw<{ member: bigint; room: bigint }[]>`
-          SELECT count(*) FILTER (WHERE "memberId" = ${input.memberId}) AS "member", count(*) AS "room"
+          SELECT count(*) FILTER (WHERE "participantId" = ${input.participantId}) AS "member", count(*) AS "room"
           FROM "StreamLease" WHERE "roomId" = ${input.roomId}`;
         if (
           Number(rows[0]!.member) >= MEMBER_STREAM_LIMIT ||
@@ -94,8 +94,8 @@ export class StreamLeaseService implements OnModuleDestroy {
         )
           return false;
         await tx.$executeRaw`
-          INSERT INTO "StreamLease" ("id", "roomId", "memberId", "instanceId", "expiresAt")
-          VALUES (${id}, ${input.roomId}, ${input.memberId}, ${this.instanceId}, clock_timestamp() + make_interval(secs => ${this.ttl / 1000}))`;
+          INSERT INTO "StreamLease" ("id", "roomId", "participantId", "instanceId", "expiresAt")
+          VALUES (${id}, ${input.roomId}, ${input.participantId}, ${this.instanceId}, clock_timestamp() + make_interval(secs => ${this.ttl / 1000}))`;
         return true;
       },
       { maxWait: this.ttl / 3, timeout: this.selfTerminateMs },

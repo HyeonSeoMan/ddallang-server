@@ -37,32 +37,73 @@ export const ROOM_SUMMARY_SCHEMA: SchemaObject = {
   },
 };
 
-export const ROOM_MEMBER_SCHEMA: SchemaObject = {
-  type: 'object',
-  required: ['id', 'roomId', 'nickname', 'isHost', 'createdAt'],
-  properties: {
-    id: str(),
-    roomId: str(),
-    nickname: str(),
-    isHost: { type: 'boolean' },
-    createdAt: iso('입장 시각'),
-  },
-};
-
 export const PARTICIPANT_SCHEMA: SchemaObject = {
   type: 'object',
-  required: ['id', 'roomId', 'nickname', 'status', 'order', 'createdAt'],
+  description: '방의 유일한 사람 단위. 신원 연결 여부는 담지 않는다(S1-C6)',
+  required: ['id', 'roomId', 'nickname', 'status', 'order', 'isHost', 'createdAt'],
   properties: {
     id: str(),
     roomId: str(),
     nickname: str(),
-    status: str(undefined, { enum: ['ACTIVE', 'INACTIVE'] }),
+    status: str('방장은 항상 ACTIVE', { enum: ['ACTIVE', 'INACTIVE'] }),
     order: {
       type: 'integer',
       minimum: 1,
-      description: '방 안에서 유일, 한 번 부여되면 바뀌지 않는다',
+      description: '방 안에서 유일, 한 번 부여되면 바뀌지 않는다(방 생성자는 1)',
     },
-    createdAt: iso('등록 시각'),
+    isHost: { type: 'boolean', description: '방을 만든 참여자만 true' },
+    createdAt: iso('생성 시각'),
+  },
+};
+
+const CLAIM_STATUS = str(undefined, { enum: ['PENDING', 'APPROVED', 'REJECTED', 'CANCELED'] });
+const REJECT_REASON = str('REJECTED일 때만 값이 있다', {
+  enum: ['HOST_REJECTED', 'TARGET_CLAIMED', 'REQUESTER_LINKED'],
+  nullable: true,
+});
+
+/** 요청자용 이어받기 요청(S1 §4, S1-C13): 대상 참여자 ID·처리한 방장 ID 없음. */
+export const MY_CLAIM_SCHEMA: SchemaObject = {
+  type: 'object',
+  required: ['id', 'nickname', 'status', 'rejectReason', 'createdAt', 'resolvedAt'],
+  properties: {
+    id: str(),
+    nickname: str('이어받을 참여자의 닉네임'),
+    status: CLAIM_STATUS,
+    rejectReason: REJECT_REASON,
+    createdAt: iso('요청 시각'),
+    resolvedAt: str('승인·거절·취소 시각(대기 중이면 null)', {
+      format: 'date-time',
+      nullable: true,
+    }),
+  },
+};
+
+/** 방장용 이어받기 요청(S1 §4.12~§4.15). 요청 브라우저를 식별하는 정보는 없다. */
+export const CLAIM_SCHEMA: SchemaObject = {
+  type: 'object',
+  required: [
+    'id',
+    'participantId',
+    'nickname',
+    'status',
+    'rejectReason',
+    'createdAt',
+    'resolvedAt',
+    'resolvedById',
+  ],
+  properties: {
+    id: str(),
+    participantId: str('이어받을 대상 Participant ID'),
+    nickname: str('대상 참여자의 닉네임'),
+    status: CLAIM_STATUS,
+    rejectReason: REJECT_REASON,
+    createdAt: iso('요청 시각'),
+    resolvedAt: str('승인·거절·취소 시각(대기 중이면 null)', {
+      format: 'date-time',
+      nullable: true,
+    }),
+    resolvedById: str('처리한 방장 Participant ID(대기·취소는 null)', { nullable: true }),
   },
 };
 
@@ -86,7 +127,7 @@ export const TRANSACTION_SCHEMA: SchemaObject = {
     amount: { type: 'integer', minimum: 1, maximum: 999999999 },
     reason: str('사유(최대 50자)', { nullable: true }),
     round: str('라운드(최대 12자)', { nullable: true }),
-    authorId: str('작성자 RoomMember ID'),
+    authorId: str('작성자 Participant ID'),
     createdAt: iso('원본 서버 생성 시각'),
     updatedAt: iso('마지막으로 값이 바뀐 시각(생성 시 createdAt과 같다)'),
   },

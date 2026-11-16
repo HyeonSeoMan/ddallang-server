@@ -6,7 +6,7 @@ import {
   type ValidationResult,
 } from './types.js';
 
-/** S1 §3.2: 방 이름·정산 단위·RoomMember 닉네임·Participant 닉네임에 공통인 길이 상한. */
+/** S1 §3.2: 방 이름·정산 단위·참여자 닉네임에 공통인 길이 상한. */
 export const STRICT_TEXT_MAX = 12;
 /** 정규화 전 원본의 상한. 분해형 한글 12자는 최대 36 코드 포인트라 정상 입력을 막지 않는다. */
 export const STRICT_TEXT_RAW_MAX = 64;

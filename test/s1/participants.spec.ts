@@ -41,22 +41,32 @@ describe('POST /rooms/{roomId}/participants (S1 §4.6)', () => {
     ac(
       ['AC-PART-001-1', 'AC-PART-001-2', 'AC-PART-001-4'],
       'S1 §4.6',
-      '방장 등록 → 201 ACTIVE, order 부여(1부터 순서대로), 이후 불변',
+      '방장 직접 추가 → 201 ACTIVE·isHost=false·신원 없음(후보 닉네임이 됨), order는 방 생성(1) 다음부터 순서대로',
     ),
     async () => {
       const c = await createRoom(s.http);
       const a = await addParticipant(s.http, c, 'Amy');
       const b = await addParticipant(s.http, c, 'Bob');
       expect(a.status).toBe(201);
-      expect(a.body.participant).toMatchObject({
+      expect(a.body.participant).toEqual({
+        id: expect.any(String),
         roomId: c.roomId,
         nickname: 'Amy',
         status: 'ACTIVE',
-        order: 1,
+        order: 2,
+        isHost: false,
+        createdAt: expect.any(String),
       });
-      expect(b.body.participant.order).toBe(2);
+      expect(b.body.participant.order).toBe(3);
       const list = await s.http.get(`/rooms/${c.roomId}/participants`).set(auth(c.key));
-      expect(list.body.participants.map((p: { order: number }) => p.order)).toEqual([1, 2]);
+      expect(list.body.participants.map((p: { order: number }) => p.order)).toEqual([1, 2, 3]);
+      const [row] = await s.db.query<{ identityKeyHash: string | null }>(
+        `SELECT "identityKeyHash" FROM "Participant" WHERE "id"=$1`,
+        [a.body.participant.id],
+      );
+      expect(row!.identityKeyHash).toBeNull(); // 신원 키가 연결되지 않은 참여자(OQ-042)
+      const inv = await s.http.get(`/invites/${c.inviteCode}`);
+      expect(inv.body.claimableNicknames).toEqual(['Amy', 'Bob']); // 이 닉네임으로 이어받기를 요청할 수 있다
     },
   );
 
@@ -80,7 +90,7 @@ describe('POST /rooms/{roomId}/participants (S1 §4.6)', () => {
       expectApiError(await asMember({}), 403, 'HOST_ONLY'); // 본문이 틀려도 403
       await endRoom(s.db, c.roomId);
       expectApiError(await asMember({ nickname: 'P' }), 403, 'HOST_ONLY'); // 종료된 방이어도 403
-      expect(await count(s.db, 'Participant', c.roomId)).toBe(0);
+      expect(await count(s.db, 'Participant', c.roomId)).toBe(2); // 방장과 입장한 Kim뿐
     },
   );
 
@@ -110,11 +120,11 @@ describe('POST /rooms/{roomId}/participants (S1 §4.6)', () => {
       await addParticipant(s.http, c, 'Kim');
       expectApiError(await addParticipant(s.http, c, 'kim'), 409, 'NICKNAME_TAKEN');
       expectApiError(await addParticipant(s.http, c, 'KIM'), 409, 'NICKNAME_TAKEN');
-      expect(await count(s.db, 'Participant', c.roomId)).toBe(1);
+      expect(await count(s.db, 'Participant', c.roomId)).toBe(2); // 방장 + Kim
     },
   );
 
-  describe('닉네임 규칙(Participant 쪽)', () => {
+  describe('닉네임 규칙(직접 추가)', () => {
     it(ac(['AC-ROOM-006-1', 'AC-ROOM-006-9'], 'S1 §3.2', '길이 1·12 허용, 0·13 거부'), async () => {
       const c = await createRoom(s.http);
       expect((await addParticipant(s.http, c, 'a')).status).toBe(201);
@@ -152,7 +162,7 @@ describe('POST /rooms/{roomId}/participants (S1 §4.6)', () => {
       },
     );
     it(
-      ac(['AC-ROOM-006-5'], 'S1 §3.2', '"Kim" 사용 중 → "kim"·"KIM" 거부(Participant 유형)'),
+      ac(['AC-ROOM-006-5'], 'S1 §6.2', '"Kim" 사용 중 → "kim"·"KIM"의 직접 추가 거부'),
       async () => {
         const c = await createRoom(s.http);
         await addParticipant(s.http, c, 'Kim');
@@ -161,15 +171,20 @@ describe('POST /rooms/{roomId}/participants (S1 §4.6)', () => {
       },
     );
     it(
-      ac(['AC-ROOM-006-6'], 'S1 §2.2', 'Participant "Kim"은 RoomMember "Kim"과 공존한다'),
+      ac(
+        ['AC-ROOM-006-6'],
+        'S1 §6.2',
+        '입장으로 생긴 "Kim"이 있으면 직접 추가 "Kim"·"kim"은 409(하나의 범위)',
+      ),
       async () => {
         const c = await createRoom(s.http);
         await join(s.http, c.inviteCode, 'Kim');
-        expect((await addParticipant(s.http, c, 'Kim')).status).toBe(201);
+        expectApiError(await addParticipant(s.http, c, 'Kim'), 409, 'NICKNAME_TAKEN');
+        expectApiError(await addParticipant(s.http, c, 'kim'), 409, 'NICKNAME_TAKEN');
       },
     );
     it(
-      ac(['AC-ROOM-006-7'], 'S1 §2.2', '다른 방에서는 같은 참여자 닉네임을 쓸 수 있다'),
+      ac(['AC-ROOM-006-7'], 'S1 §6.2', '다른 방에서는 같은 참여자 닉네임을 쓸 수 있다'),
       async () => {
         const a = await createRoom(s.http);
         const b = await createRoom(s.http);
@@ -208,21 +223,22 @@ describe('POST /rooms/{roomId}/participants (S1 §4.6)', () => {
     );
   });
 
-  describe('한도(Participant 10명)', () => {
+  describe('한도(참여자 10명, 방장 포함)', () => {
     it(
       ac(
-        ['AC-ROOM-008-1', 'AC-ROOM-008-11'],
+        ['AC-ROOM-008-2', 'AC-ROOM-008-4'],
         'S1 §6.4',
-        '10번째 성공, 11번째 409 PARTICIPANT_LIMIT_EXCEEDED, 부분 저장 없음',
+        '방장 + 직접 추가 9명 = 10명에서 직접 추가 → 409 PARTICIPANT_LIMIT_EXCEEDED(details.limit), 부분 저장 없음',
       ),
       async () => {
         const c = await createRoom(s.http);
-        for (let i = 1; i <= 10; i++)
+        for (let i = 2; i <= 10; i++)
           expect((await addParticipant(s.http, c, `p${i}`)).status, `p${i}`).toBe(201);
-        expectApiError(await addParticipant(s.http, c, 'p11'), 409, 'PARTICIPANT_LIMIT_EXCEEDED', [
-          { limit: 10 },
-        ]);
+        const rev = await revision(s.db, c.roomId);
+        const res = await addParticipant(s.http, c, 'p11');
+        expectApiError(res, 409, 'PARTICIPANT_LIMIT_EXCEEDED', [{ limit: 10 }]);
         expect(await count(s.db, 'Participant', c.roomId)).toBe(10);
+        expect(await revision(s.db, c.roomId)).toBe(rev);
         // 기존 신원(방장) 접근은 한도와 무관하다
         expect((await s.http.get(`/rooms/${c.roomId}/participants`).set(auth(c.key))).status).toBe(
           200,
@@ -239,7 +255,7 @@ describe('POST /rooms/{roomId}/participants (S1 §4.6)', () => {
       .set('Content-Type', 'application/json')
       .send('{"nick');
     expectApiError(res, 422, 'VALIDATION_FAILED', [{ field: 'body', code: 'INVALID_VALUE' }]);
-    expect(await count(s.db, 'Participant', c.roomId)).toBe(0);
+    expect(await count(s.db, 'Participant', c.roomId)).toBe(1); // 방장뿐
     expect(await revision(s.db, c.roomId)).toBe(0);
   });
 
@@ -257,11 +273,23 @@ describe('POST /rooms/{roomId}/participants (S1 §4.6)', () => {
     expect(JSON.stringify(evs[0])).not.toContain('Amy'); // 내용을 싣지 않는다
   });
 
-  it('등록은 RoomMember를 만들지 않는다(S1 §6.1)', async () => {
-    const c = await createRoom(s.http);
-    await addParticipant(s.http, c, 'Amy');
-    expect(await count(s.db, 'RoomMember', c.roomId)).toBe(1);
-  });
+  it(
+    ac(
+      ['AC-ROOM-004-2'],
+      'S1 §4.6',
+      '직접 추가는 참여자 하나를 만들고 아무 신원 키에도 연결하지 않는다',
+    ),
+    async () => {
+      const c = await createRoom(s.http);
+      await addParticipant(s.http, c, 'Amy');
+      expect(await count(s.db, 'Participant', c.roomId)).toBe(2);
+      const linked = await s.db.query(
+        `SELECT 1 FROM "Participant" WHERE "roomId"=$1 AND "identityKeyHash" IS NOT NULL`,
+        [c.roomId],
+      );
+      expect(linked).toHaveLength(1); // 방장만 연결되어 있다
+    },
+  );
 });
 
 describe('PATCH /rooms/{roomId}/participants/{participantId} (S1 §4.7)', () => {
@@ -275,22 +303,31 @@ describe('PATCH /rooms/{roomId}/participants/{participantId} (S1 §4.7)', () => 
     ac(
       ['AC-PART-002-1', 'AC-PART-002-9'],
       'S1 §4.7',
-      '비활성화·재활성화가 되고 order·닉네임은 바뀌지 않는다',
+      '비활성화·재활성화가 되고 order·닉네임·신원 연결은 바뀌지 않는다. 비활성 참여자는 조회를 계속한다',
     ),
     async () => {
       const c = await createRoom(s.http);
       await addParticipant(s.http, c, 'First');
-      const p = (await addParticipant(s.http, c, 'Second')).body.participant;
+      const kim = await join(s.http, c.inviteCode, 'Second');
+      const p = kim.res.body.me;
       const off = await patch(c, p.id, { status: 'INACTIVE' });
       expect(off.status).toBe(200);
       expect(off.body.participant).toMatchObject({
         id: p.id,
         status: 'INACTIVE',
-        order: 2,
+        order: 3,
         nickname: 'Second',
+        isHost: false,
       });
+      // 비활성 참여자의 신원은 연결된 채 남고 조회할 수 있다(OQ-044)
+      const me = await s.http.get(`/rooms/${c.roomId}`).set(auth(kim.key));
+      expect(me.status).toBe(200);
+      expect(me.body.me).toMatchObject({ id: p.id, status: 'INACTIVE' });
       const on = await patch(c, p.id, { status: 'ACTIVE' });
-      expect(on.body.participant).toMatchObject({ status: 'ACTIVE', order: 2, nickname: 'Second' });
+      expect(on.body.participant).toMatchObject({ status: 'ACTIVE', order: 3, nickname: 'Second' });
+      expect((await s.http.get(`/rooms/${c.roomId}`).set(auth(kim.key))).body.me.status).toBe(
+        'ACTIVE',
+      );
     },
   );
 
@@ -305,10 +342,9 @@ describe('PATCH /rooms/{roomId}/participants/{participantId} (S1 §4.7)', () => 
         .set(auth(member.key))
         .send({ status: 'INACTIVE' });
       expectApiError(res, 403, 'HOST_ONLY');
-      expect(
-        (await s.http.get(`/rooms/${c.roomId}/participants`).set(auth(c.key))).body.participants[0]
-          .status,
-      ).toBe('ACTIVE');
+      const list = (await s.http.get(`/rooms/${c.roomId}/participants`).set(auth(c.key))).body
+        .participants as { id: string; status: string }[];
+      expect(list.find((x) => x.id === p.id)!.status).toBe('ACTIVE');
     },
   );
 
@@ -340,10 +376,9 @@ describe('PATCH /rooms/{roomId}/participants/{participantId} (S1 §4.7)', () => 
     const foreign = await patch(a, other.id, { status: 'INACTIVE' });
     expectApiError(foreign, 404, 'PARTICIPANT_NOT_FOUND');
     expect(foreign.body).toEqual(missing.body);
-    expect(
-      (await s.http.get(`/rooms/${b.roomId}/participants`).set(auth(b.key))).body.participants[0]
-        .status,
-    ).toBe('ACTIVE');
+    const list = (await s.http.get(`/rooms/${b.roomId}/participants`).set(auth(b.key))).body
+      .participants as { id: string; status: string }[];
+    expect(list.find((x) => x.id === other.id)!.status).toBe('ACTIVE');
   });
 
   it('status 검증: 없음 REQUIRED, 문자열 아님 INVALID_TYPE, 허용 밖 INVALID_VALUE', async () => {
@@ -384,10 +419,40 @@ describe('PATCH /rooms/{roomId}/participants/{participantId} (S1 §4.7)', () => 
         { field: 'nickname', code: 'NOT_ALLOWED_FIELD' },
         { field: 'status', code: 'REQUIRED' },
       ]);
-      const after = (await s.http.get(`/rooms/${c.roomId}/participants`).set(auth(c.key))).body
-        .participants[0];
+      const after = (
+        (await s.http.get(`/rooms/${c.roomId}/participants`).set(auth(c.key))).body
+          .participants as { id: string }[]
+      ).find((x) => x.id === p.id);
       expect(after).toMatchObject({ nickname: 'Kim', status: 'ACTIVE' });
       expect(await revision(s.db, c.roomId)).toBe(1); // 등록 1회뿐
+    },
+  );
+
+  it(
+    ac(
+      ['AC-PART-002-10'],
+      'S1 §4.7',
+      '방장 참여자에 INACTIVE → 409 HOST_CANNOT_BE_DEACTIVATED, 상태 불변·이벤트 없음. ACTIVE → 200 변경 없음',
+    ),
+    async () => {
+      const c = await createRoom(s.http);
+      const rev = await revision(s.db, c.roomId);
+      expectApiError(
+        await patch(c, c.hostId, { status: 'INACTIVE' }),
+        409,
+        'HOST_CANNOT_BE_DEACTIVATED',
+      );
+      // 검사 순서: 입력 검증(7)이 상태 충돌(8)보다 앞이다
+      expectApiError(await patch(c, c.hostId, { status: 'PAUSED' }), 422, 'VALIDATION_FAILED');
+      const same = await patch(c, c.hostId, { status: 'ACTIVE' });
+      expect(same.status).toBe(200);
+      expect(same.body.participant).toMatchObject({ id: c.hostId, status: 'ACTIVE', isHost: true });
+      expect(await revision(s.db, c.roomId)).toBe(rev);
+      expect((await s.http.get(`/rooms/${c.roomId}`).set(auth(c.key))).body.me.status).toBe(
+        'ACTIVE',
+      );
+      await endRoom(s.db, c.roomId);
+      expectApiError(await patch(c, c.hostId, { status: 'INACTIVE' }), 409, 'GAME_ENDED'); // 5번이 8번보다 앞
     },
   );
 

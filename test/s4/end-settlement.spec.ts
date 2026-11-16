@@ -70,10 +70,11 @@ describe('정산 조회 (BE-S4-2)', () => {
     ac(
       ['AC-SET-005-1', 'AC-SET-007-1', 'AC-SET-007-3', 'AC-SET-008-4', 'AC-ROOM-002-5'],
       'S4 §6.4',
-      '종료 직후 FINAL, 예상과 같은 항목, 반복 조회·종료 후 입장자도 같다',
+      '종료 직후 FINAL, 예상과 같은 항목, 반복 조회·종료 뒤 복원한 참여자도 같다',
     ),
     async () => {
       const r = await setupRoom(s.http);
+      const kim = await join(s.http, r.c.inviteCode, 'Kim');
       await pay(r, r.p.a, r.p.b, 300);
       await pay(r, r.p.c, r.p.b, 100);
       const before = await settle(r);
@@ -83,9 +84,11 @@ describe('정산 조회 (BE-S4-2)', () => {
         { payerId: r.p.c, payerNickname: 'Cc', payeeId: r.p.b, payeeNickname: 'Bb', amount: 100 },
       ]);
       expect((await end(r)).status).toBe(200);
-      const late = await join(s.http, r.c.inviteCode, 'Late');
+      // 종료 뒤에는 새로 입장할 수 없고(OQ-043) 이미 입장한 참여자는 복원해 조회한다
+      expect((await join(s.http, r.c.inviteCode, 'Late')).res.status).toBe(409);
+      expect((await join(s.http, r.c.inviteCode, 'x', kim.key)).res.status).toBe(200);
       const a = await settle(r);
-      const b = await settle(r, late.key);
+      const b = await settle(r, kim.key);
       expect(a.body.settlement.kind).toBe('FINAL');
       expect(a.body.settlement.items).toEqual(before.body.settlement.items);
       expect(JSON.stringify(b.body)).toBe(JSON.stringify(a.body));
@@ -415,11 +418,13 @@ describe('게임 종료 (BE-S4-3)', () => {
     ac(
       ['AC-SET-001-4', 'AC-SET-001-7'],
       'S4 §6.1',
-      '종료는 거래 0건·참여자 0명도 허용, 자동 종료·만료·삭제 경로 없음(정적)',
+      '종료는 거래 0건·방장 외 참여자 0명(방은 항상 방장 참여자가 있다)도 허용, 자동 종료·만료·삭제 경로 없음(정적)',
     ),
     async () => {
       const r = await setupRoom(s.http);
-      await s.db.query(`DELETE FROM "Participant" WHERE "roomId"=$1`, [r.c.roomId]);
+      await s.db.query(`DELETE FROM "Participant" WHERE "roomId"=$1 AND NOT "isHost"`, [
+        r.c.roomId,
+      ]);
       expect((await end(r)).status).toBe(200);
       expect(await settle(r)).toMatchObject({
         status: 200,

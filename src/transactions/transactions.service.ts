@@ -23,7 +23,7 @@ export interface Reply extends StoredResponse {
 }
 
 export interface Requester {
-  memberId: string;
+  participantId: string;
   roomId: string;
   isHost: boolean;
 }
@@ -80,7 +80,7 @@ export class TransactionsService {
       const now = await this.db.dbNow(tx); // 잠금을 얻은 시점의 DB 시각
       const base = {
         roomId: requester.roomId,
-        memberId: requester.memberId,
+        participantId: requester.participantId,
         key,
         firstAttemptAt,
         fingerprint: print,
@@ -184,7 +184,7 @@ export class TransactionsService {
             amount: BigInt(amount!),
             reason: reason ?? null,
             round: round ?? null,
-            authorId: requester.memberId, // 본문의 작성자 값은 신뢰하지 않는다
+            authorId: requester.participantId, // 본문의 작성자 값은 신뢰하지 않는다
             originalAmount: BigInt(amount!),
             originalReason: reason ?? null,
             originalRound: round ?? null,
@@ -280,7 +280,7 @@ export class TransactionsService {
         const deletedAt = await this.nextUpdatedAt(tx, target.createdAt, now);
         await tx.transaction.update({
           where: { id: transactionId },
-          data: { deletedAt, deletedById: requester.memberId },
+          data: { deletedAt, deletedById: requester.participantId },
         });
         return {
           status: 200,
@@ -299,7 +299,7 @@ export class TransactionsService {
       where: { id: transactionId, roomId: requester.roomId },
     });
     if (!target) throw new ApiError('TRANSACTION_NOT_FOUND');
-    if (target.authorId !== requester.memberId && !requester.isHost)
+    if (target.authorId !== requester.participantId && !requester.isHost)
       throw new ApiError('NOT_AUTHOR_OR_HOST');
     return target;
   }

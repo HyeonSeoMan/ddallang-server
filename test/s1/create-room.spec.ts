@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ac, expectApiError } from '../helpers/contract.js';
-import { auth, bootS1, count, createRoom, newKey, type S1Env } from './s1-helpers.js';
+import { hashIdentityKey } from '../../src/common/auth/identity-key.js';
+import { auth, bootS1, count, createRoom, newKey, revision, type S1Env } from './s1-helpers.js';
 
 let s: S1Env;
 beforeAll(async () => {
@@ -20,7 +21,7 @@ describe('POST /rooms (S1 §4.1)', () => {
     ac(
       ['AC-ROOM-001-1', 'AC-ROOM-001-7', 'AC-ROOM-001-9'],
       'S1 §4.1',
-      '유효 입력 → 201, IN_PROGRESS, 초대 코드, 방장 me(방장 닉네임이 됨)',
+      '유효 입력 → 201, IN_PROGRESS, 초대 코드, me가 첫 참여자(방장, order 1, ACTIVE)이고 참여자 목록은 그 1명',
     ),
     async () => {
       const key = newKey();
@@ -30,22 +31,29 @@ describe('POST /rooms (S1 §4.1)', () => {
       expect(res.body.room.id).toMatch(/^[A-Za-z0-9_-]{22}$/);
       expect(res.body.room.inviteCode).toMatch(/^[A-Za-z0-9_-]{22}$/); // 128비트 URL-safe
       expect(res.body.room.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T.*Z$/);
-      expect(res.body.me).toMatchObject({
+      expect(res.body.me).toEqual({
+        id: expect.stringMatching(/^[A-Za-z0-9_-]{22}$/),
         roomId: res.body.room.id,
         nickname: 'Host',
+        status: 'ACTIVE',
+        order: 1,
         isHost: true,
+        createdAt: expect.stringMatching(/Z$/),
       });
       // 서버 내부 값은 응답에 없다
       expect(JSON.stringify(res.body)).not.toContain(key);
+      expect(JSON.stringify(res.body)).not.toContain(hashIdentityKey(key));
       expect(res.body.room).not.toHaveProperty('revision');
-      expect(res.body.me).not.toHaveProperty('identityKeyHash');
-      expect(res.body.me).not.toHaveProperty('nicknameKey');
-      // 생성 직후 방장은 정확히 1명, 생성자 RoomMember
-      expect(await count(s.db, 'RoomMember', res.body.room.id)).toBe(1);
-      const hosts = await s.db.query(`SELECT 1 FROM "RoomMember" WHERE "roomId"=$1 AND "isHost"`, [
-        res.body.room.id,
-      ]);
-      expect(hosts).toHaveLength(1);
+      // 생성 직후 참여자 목록은 생성자 1명이고 그가 me다(AC-ROOM-001-7)
+      const list = await s.http.get(`/rooms/${res.body.room.id}/participants`).set(auth(key));
+      expect(list.status).toBe(200);
+      expect(list.body.participants).toEqual([res.body.me]);
+      const [row] = await s.db.query<{ identityKeyHash: string }>(
+        `SELECT "identityKeyHash" FROM "Participant" WHERE "id"=$1`,
+        [res.body.me.id],
+      );
+      expect(row!.identityKeyHash).toBe(hashIdentityKey(key)); // 첫 참여자가 이 키에 연결된다
+      expect(await revision(s.db, res.body.room.id)).toBe(0); // 새 방은 변경 번호를 소비하지 않는다
     },
   );
 
@@ -53,10 +61,11 @@ describe('POST /rooms (S1 §4.1)', () => {
     ac(
       ['AC-ROOM-001-2', 'AC-ROOM-001-8'],
       'S1 §3.2',
-      '빈·누락 name → 422 REQUIRED, 방이 만들어지지 않는다(우회 요청 포함)',
+      '빈·누락 name → 422 REQUIRED, 방·참여자가 만들어지지 않는다(우회 요청 포함)',
     ),
     async () => {
       const before = await count(s.db, 'Room');
+      const people = await count(s.db, 'Participant');
       for (const name of [undefined, null, '']) {
         const res = await post({ ...valid, name });
         expectApiError(res, 422, 'VALIDATION_FAILED', [{ field: 'name', code: 'REQUIRED' }]);
@@ -65,6 +74,7 @@ describe('POST /rooms (S1 §4.1)', () => {
         { field: 'name', code: 'INVALID_TYPE' },
       ]);
       expect(await count(s.db, 'Room')).toBe(before);
+      expect(await count(s.db, 'Participant')).toBe(people);
     },
   );
 
@@ -129,10 +139,11 @@ describe('POST /rooms (S1 §4.1)', () => {
     ac(
       ['AC-ROOM-001-9', 'AC-ROOM-001-8'],
       'S1 §4.1',
-      'nickname 누락·규칙 위반 → 422, 방이 만들어지지 않는다',
+      'nickname 누락·규칙 위반 → 422, 방·참여자가 만들어지지 않는다. 유효하면 방장 참여자의 닉네임이 된다',
     ),
     async () => {
       const before = await count(s.db, 'Room');
+      const people = await count(s.db, 'Participant');
       expectApiError(await post({ name: 'x', unit: '원' }), 422, 'VALIDATION_FAILED', [
         { field: 'nickname', code: 'REQUIRED' },
       ]);
@@ -143,7 +154,9 @@ describe('POST /rooms (S1 §4.1)', () => {
         [{ field: 'nickname', code: 'CONSECUTIVE_SPACES' }],
       );
       expect(await count(s.db, 'Room')).toBe(before);
-      expect(await count(s.db, 'RoomMember')).toBe(await count(s.db, 'Room')); // 고아 RoomMember 없음
+      expect(await count(s.db, 'Participant')).toBe(people); // 고아 참여자 없음
+      const ok = await post({ name: 'x', unit: '원', nickname: 'Kim Min' });
+      expect(ok.body.me).toMatchObject({ nickname: 'Kim Min', isHost: true });
     },
   );
 

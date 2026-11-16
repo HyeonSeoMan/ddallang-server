@@ -14,7 +14,7 @@ export interface Reply extends StoredResponse {
 }
 
 export interface Requester {
-  memberId: string;
+  participantId: string;
   roomId: string;
   isHost: boolean;
 }
@@ -74,7 +74,7 @@ export class SettlementService {
       const now = await this.db.dbNow(tx);
       const base = {
         roomId: requester.roomId,
-        memberId: requester.memberId,
+        participantId: requester.participantId,
         key,
         firstAttemptAt,
         fingerprint: print,

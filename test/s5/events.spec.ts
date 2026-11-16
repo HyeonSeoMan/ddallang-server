@@ -224,7 +224,8 @@ describe('이벤트 발생 횡단 시험 (BE-S5-3, S5 §4.2, §6.1)', () => {
           { amount: 5 },
           idem(),
         ); // 409 삭제됨
-        await joinRoom(at(0), r, 'Joiner'); // 입장은 이벤트 대상이 아니다(N-5)
+        const joiner = await joinRoom(at(0), r, 'Joiner'); // 새 입장은 participant.created다(N-5 대체)
+        await api(at(0), 'POST', `/invites/${r.inviteCode}/members`, joiner.key, {}); // 복원은 이벤트 없음
         const other = (await createTx(at(0), r, 50)).body.transaction.id as string;
         await api(
           at(0),
@@ -234,7 +235,7 @@ describe('이벤트 발생 횡단 시험 (BE-S5-3, S5 §4.2, §6.1)', () => {
           { amount: 50 },
           idem(),
         ); // 값이 같은 수정
-        await s.waitFor((e) => e.length >= 7, 8_000); // ready + 변경 6건
+        await s.waitFor((e) => e.length >= 8, 8_000); // ready + 변경 7건
         await sleep(800); // 더 오는 이벤트가 없는지 기다린다
         const changes = s.events.slice(1);
         expect(changes.map((e) => e.event)).toEqual([
@@ -243,6 +244,7 @@ describe('이벤트 발생 횡단 시험 (BE-S5-3, S5 §4.2, §6.1)', () => {
           'transaction.created',
           'transaction.updated',
           'transaction.deleted',
+          'participant.created', // 새 입장
           'transaction.created', // 마지막 createTx(50)
         ]);
         expect(changes.map((e) => e.data.revision)).toEqual([
@@ -252,6 +254,7 @@ describe('이벤트 발생 횡단 시험 (BE-S5-3, S5 §4.2, §6.1)', () => {
           base + 4,
           base + 5,
           base + 6,
+          base + 7,
         ]); // 빠짐없이 1씩
         expect(changes.map((e) => Number(e.id))).toEqual(changes.map((e) => e.data.revision)); // id = revision
         // data: 식별자와 종류만, 내용(금액·사유·닉네임)은 없다
@@ -265,6 +268,7 @@ describe('이벤트 발생 횡단 시험 (BE-S5-3, S5 §4.2, §6.1)', () => {
         }
         expect(changes[0]!.data.participantId).toBe(added);
         expect(changes[2]!.data.transactionId).toBe(t);
+        expect(changes[5]!.data.participantId).toBe(joiner.memberId);
       } finally {
         s.close();
       }

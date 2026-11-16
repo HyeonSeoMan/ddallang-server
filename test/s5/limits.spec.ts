@@ -80,8 +80,8 @@ describe('SSE 연결 한도 (서버 인스턴스 전체 합산)', () => {
     }
   });
 
-  it('방당 50개: 멤버 10명이 5개씩 열어 50개(= 방 한도)가 되면 어느 멤버의 새 연결도 거부된다', async () => {
-    const r = await makeRoom(at(0));
+  it('방당 50개: 참여자 10명이 5개씩 열어 50개(= 방 한도)가 되면 어느 참여자의 새 연결도 거부된다', async () => {
+    const r = await makeRoom(at(0), 0); // 방장 1명 + 입장 9명 = 참여자 한도 10명
     const members: { key: string }[] = [{ key: r.key }];
     for (let i = 1; i < 10; i++) members.push(await joinRoom(at(0), r, `Mem${i}`));
     const all: OpenedStream[] = [];
@@ -94,7 +94,7 @@ describe('SSE 연결 한도 (서버 인스턴스 전체 합산)', () => {
       }
       expect(ok(all)).toHaveLength(50);
       expect(await leaseCount(r.roomId)).toBe(50);
-      // 방 전체가 50개다. RoomMember가 최대 10명이라 방 한도(50)는 멤버 한도(5)의 합과 같아 멤버 한도가 먼저 닿는다
+      // 방 전체가 50개다. 참여자가 최대 10명이라 방 한도(50)는 참여자 한도(5)의 합과 같아 참여자 한도가 먼저 닿는다
       const rejected = await openStream(at(1), r.roomId, members[3]!.key);
       expect(rejected.status).toBe(429);
       expect(rejected.body).toMatchObject({ error: { code: 'CONNECTION_LIMIT_EXCEEDED' } });

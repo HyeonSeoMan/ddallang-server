@@ -28,11 +28,18 @@ interface Live {
   streams: OpenedStream[];
 }
 
-/** S5 §6.7 측정 조건: 방 한도 접속자 10명(방장 + 9명)이 SSE로 연결되고 참여자·거래가 초기 상태로 채워진 방. */
-async function liveRoom(participants: number, txs: number): Promise<Live> {
-  const room = await makeRoom(at(0), participants);
+/**
+ * S5 §6.7 측정 조건: 신원이 연결된 참여자 `people`명(방장 + 입장자)이 모두 SSE로 연결되고 거래가 초기 상태로 채워진 방.
+ * 참여자 한도 10명 안에서 사람 단위는 참여자 하나다(S1 §2.3 I2). `room.p`는 입장한 참여자 ID다.
+ */
+async function liveRoom(people: number, txs: number): Promise<Live> {
+  const room = await makeRoom(at(0), 0);
   const keys = [room.key];
-  for (let m = 1; m < 10; m++) keys.push((await joinRoom(at(m), room, `M${m}`)).key);
+  for (let m = 1; m < people; m++) {
+    const joined = await joinRoom(at(m), room, `M${m}`);
+    keys.push(joined.key);
+    room.p.push(joined.memberId);
+  }
   if (txs > 0) {
     await seedTransactions(
       db,

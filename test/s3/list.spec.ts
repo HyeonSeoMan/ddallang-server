@@ -444,14 +444,16 @@ describe('커서 (S3 §4.1.2, PD-12)', () => {
 });
 
 describe('권한과 상태', () => {
-  it('비멤버·키 없음·종료된 방', async () => {
+  it('비참여자·키 없음·종료된 방', async () => {
     const r = await setupRoom(s.http);
+    const member = await join(s.http, r.c.inviteCode, 'Kim');
     await postTx(s.http, r.c.roomId, r.c.key, { payerId: r.p.a, payeeId: r.p.b, amount: 5 });
     expectApiError(await list(r, '', newKey()), 404, 'ROOM_NOT_FOUND');
     expectApiError(await s.http.get(`/rooms/${r.c.roomId}/transactions`), 401, 'UNAUTHENTICATED');
     await endRoom(s.db, r.c.roomId);
     expect((await list(r)).body.transactions).toHaveLength(1);
-    const member = await join(s.http, r.c.inviteCode, 'Late'); // 종료 후 입장자
+    // 종료 뒤에는 새로 입장할 수 없다(OQ-043). 이미 입장한 참여자는 복원해 조회한다
+    expect((await join(s.http, r.c.inviteCode, 'x', member.key)).res.status).toBe(200);
     expect((await list(r, '', member.key)).status).toBe(200);
   });
 

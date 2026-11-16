@@ -111,9 +111,10 @@ describe('PUT /rooms/{roomId}/transactions/{id} (S2 §4.2)', () => {
       expectApiError(await delTx(s.http, r.c.roomId, third.key, t.id), 403, 'NOT_AUTHOR_OR_HOST');
       expect(await row(t.id)).toEqual(before);
       expect(await revision(s.db, r.c.roomId)).toBe(revBefore);
-      const records = await s.db.query(`SELECT 1 FROM "IdempotencyRecord" WHERE "memberId"=$1`, [
-        third.res.body.me.id,
-      ]);
+      const records = await s.db.query(
+        `SELECT 1 FROM "IdempotencyRecord" WHERE "participantId"=$1`,
+        [third.res.body.me.id],
+      );
       expect(records).toHaveLength(0); // 403은 기록하지 않는다
     },
   );
