@@ -13,6 +13,9 @@ export interface RoomEventPayload {
   serverTime: string;
   transactionId?: string;
   participantId?: string;
+  claimId?: string;
+  /** 내부 필드(PD-26): 이어받기 승인으로 이전 키를 잃은 참여자. SSE `data`에는 싣지 않는다 */
+  revokedParticipantId?: string;
 }
 
 type Handler = (event: RoomEventPayload) => void;

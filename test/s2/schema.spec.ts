@@ -23,14 +23,15 @@ async function world() {
     roomId,
     newInviteCode(),
   ]);
+  // 작성자(방장 참여자, 신원 연결)와 당사자 A·B. 작성자·삭제자·멱등 기록은 모두 참여자를 가리킨다(PD-21)
   const member = newId();
   await db.query(
-    `INSERT INTO "RoomMember" ("id","roomId","nickname","nicknameKey","isHost","identityKeyHash") VALUES ($1,$2,'H','h',true,$3)`,
+    `INSERT INTO "Participant" ("id","roomId","nickname","nicknameKey","order","isHost","identityKeyHash") VALUES ($1,$2,'H','h',1,true,$3)`,
     [member, roomId, 'a'.repeat(64)],
   );
   const [pa, pb] = [newId(), newId()];
   await db.query(
-    `INSERT INTO "Participant" ("id","roomId","nickname","nicknameKey","order") VALUES ($1,$2,'A','a',1),($3,$2,'B','b',2)`,
+    `INSERT INTO "Participant" ("id","roomId","nickname","nicknameKey","order") VALUES ($1,$2,'A','a',2),($3,$2,'B','b',3)`,
     [pa, roomId, pb],
   );
   return { roomId, member, pa, pb };
@@ -174,7 +175,7 @@ describe('Transaction 제약 (BE-S2-1)', () => {
 describe('IdempotencyRecord 제약 (BE-F6)', () => {
   const insert = (w: Awaited<ReturnType<typeof world>>, o: Record<string, unknown> = {}) =>
     db.query(
-      `INSERT INTO "IdempotencyRecord" ("id","roomId","memberId","key","operation","fingerprint","firstAttemptAt","expiresAt","statusCode","responseBody")
+      `INSERT INTO "IdempotencyRecord" ("id","roomId","participantId","key","operation","fingerprint","firstAttemptAt","expiresAt","statusCode","responseBody")
        VALUES ($1,$2,$3,$4,$5,$6,now(),now() + interval '24 hours',$7,'{}'::jsonb)`,
       [
         newId(),
@@ -187,40 +188,40 @@ describe('IdempotencyRecord 제약 (BE-F6)', () => {
       ],
     );
 
-  it('(방, RoomMember, 키)는 유일하고 다른 방·다른 멤버의 같은 키는 별개다', async () => {
+  it('(방, 참여자, 키)는 유일하고 다른 방·다른 참여자의 같은 키는 별개다(PD-7)', async () => {
     const a = await world();
     const b = await world();
     await insert(a, { key: 'u'.repeat(22) });
     expect(
       await reject(
-        `INSERT INTO "IdempotencyRecord" ("id","roomId","memberId","key","operation","fingerprint","firstAttemptAt","expiresAt","statusCode","responseBody") VALUES ($1,$2,$3,$4,'CREATE',$5,now(),now()+interval '1 day',201,'{}')`,
+        `INSERT INTO "IdempotencyRecord" ("id","roomId","participantId","key","operation","fingerprint","firstAttemptAt","expiresAt","statusCode","responseBody") VALUES ($1,$2,$3,$4,'CREATE',$5,now(),now()+interval '1 day',201,'{}')`,
         [newId(), a.roomId, a.member, 'u'.repeat(22), 'a'.repeat(64)],
       ),
     ).toBe('23505');
     await insert(b, { key: 'u'.repeat(22) }); // 다른 방
     const other = newId();
     await db.query(
-      `INSERT INTO "RoomMember" ("id","roomId","nickname","nicknameKey","isHost","identityKeyHash") VALUES ($1,$2,'M','m',false,$3)`,
+      `INSERT INTO "Participant" ("id","roomId","nickname","nicknameKey","order","identityKeyHash") VALUES ($1,$2,'M','m',9,$3)`,
       [other, a.roomId, 'b'.repeat(64)],
     );
     await db.query(
-      `INSERT INTO "IdempotencyRecord" ("id","roomId","memberId","key","operation","fingerprint","firstAttemptAt","expiresAt","statusCode","responseBody") VALUES ($1,$2,$3,$4,'CREATE',$5,now(),now()+interval '1 day',201,'{}')`,
+      `INSERT INTO "IdempotencyRecord" ("id","roomId","participantId","key","operation","fingerprint","firstAttemptAt","expiresAt","statusCode","responseBody") VALUES ($1,$2,$3,$4,'CREATE',$5,now(),now()+interval '1 day',201,'{}')`,
       [newId(), a.roomId, other, 'u'.repeat(22), 'a'.repeat(64)],
-    ); // 같은 방 다른 멤버
+    ); // 같은 방 다른 참여자
   });
 
   it('연산 종류·지문(SHA-256 hex)·키 형식·만료 순서를 DB가 강제한다', async () => {
     const w = await world();
     expect(
       await reject(
-        `INSERT INTO "IdempotencyRecord" ("id","roomId","memberId","key","operation","fingerprint","firstAttemptAt","expiresAt","statusCode","responseBody") VALUES ($1,$2,$3,$4,'PATCH',$5,now(),now()+interval '1 day',201,'{}')`,
+        `INSERT INTO "IdempotencyRecord" ("id","roomId","participantId","key","operation","fingerprint","firstAttemptAt","expiresAt","statusCode","responseBody") VALUES ($1,$2,$3,$4,'PATCH',$5,now(),now()+interval '1 day',201,'{}')`,
         [newId(), w.roomId, w.member, 'k'.repeat(22), 'a'.repeat(64)],
       ),
     ).toBe('23514');
     for (const fp of ['A'.repeat(64), 'a'.repeat(63), 'z'.repeat(64)]) {
       expect(
         await reject(
-          `INSERT INTO "IdempotencyRecord" ("id","roomId","memberId","key","operation","fingerprint","firstAttemptAt","expiresAt","statusCode","responseBody") VALUES ($1,$2,$3,$4,'CREATE',$5,now(),now()+interval '1 day',201,'{}')`,
+          `INSERT INTO "IdempotencyRecord" ("id","roomId","participantId","key","operation","fingerprint","firstAttemptAt","expiresAt","statusCode","responseBody") VALUES ($1,$2,$3,$4,'CREATE',$5,now(),now()+interval '1 day',201,'{}')`,
           [newId(), w.roomId, w.member, 'k'.repeat(22), fp],
         ),
       ).toBe('23514');
@@ -228,7 +229,7 @@ describe('IdempotencyRecord 제약 (BE-F6)', () => {
     for (const key of ['short', 'k'.repeat(65), 'has space 12345678', 'bad+key/123456789012']) {
       expect(
         await reject(
-          `INSERT INTO "IdempotencyRecord" ("id","roomId","memberId","key","operation","fingerprint","firstAttemptAt","expiresAt","statusCode","responseBody") VALUES ($1,$2,$3,$4,'CREATE',$5,now(),now()+interval '1 day',201,'{}')`,
+          `INSERT INTO "IdempotencyRecord" ("id","roomId","participantId","key","operation","fingerprint","firstAttemptAt","expiresAt","statusCode","responseBody") VALUES ($1,$2,$3,$4,'CREATE',$5,now(),now()+interval '1 day',201,'{}')`,
           [newId(), w.roomId, w.member, key, 'a'.repeat(64)],
         ),
         key,
@@ -236,7 +237,7 @@ describe('IdempotencyRecord 제약 (BE-F6)', () => {
     }
     expect(
       await reject(
-        `INSERT INTO "IdempotencyRecord" ("id","roomId","memberId","key","operation","fingerprint","firstAttemptAt","expiresAt","statusCode","responseBody") VALUES ($1,$2,$3,$4,'CREATE',$5,now(),now()-interval '1 day',201,'{}')`,
+        `INSERT INTO "IdempotencyRecord" ("id","roomId","participantId","key","operation","fingerprint","firstAttemptAt","expiresAt","statusCode","responseBody") VALUES ($1,$2,$3,$4,'CREATE',$5,now(),now()-interval '1 day',201,'{}')`,
         [newId(), w.roomId, w.member, 'k'.repeat(22), 'a'.repeat(64)],
       ),
     ).toBe('23514');

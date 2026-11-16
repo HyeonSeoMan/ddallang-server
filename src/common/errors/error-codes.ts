@@ -5,18 +5,37 @@
 export const ERROR_CODES = {
   // S1 §3.4
   UNAUTHENTICATED: { status: 401, message: '인증 정보가 없거나 올바르지 않습니다.' },
+  IDENTITY_REVOKED: {
+    status: 401,
+    message: '다른 브라우저가 이 참여자를 이어받아 이 브라우저는 방에 접근할 수 없습니다.',
+  },
   HOST_ONLY: { status: 403, message: '방장만 할 수 있는 동작입니다.' },
   ROOM_NOT_FOUND: { status: 404, message: '방을 찾을 수 없습니다.' },
   INVITE_NOT_FOUND: { status: 404, message: '초대 링크를 찾을 수 없습니다.' },
   PARTICIPANT_NOT_FOUND: { status: 404, message: '참여자를 찾을 수 없습니다.' },
+  CLAIM_NOT_FOUND: { status: 404, message: '이어받기 요청을 찾을 수 없습니다.' },
   ROUTE_NOT_FOUND: { status: 404, message: '요청한 경로가 없습니다.' },
   NOT_SUPPORTED: { status: 405, message: '지원하지 않는 요청입니다.' },
   GAME_ENDED: { status: 409, message: '이미 종료된 방입니다.' },
   NICKNAME_TAKEN: { status: 409, message: '이미 사용 중인 닉네임입니다.' },
-  MEMBER_LIMIT_EXCEEDED: { status: 409, message: '방에 입장할 수 있는 인원을 넘었습니다.' },
   PARTICIPANT_LIMIT_EXCEEDED: { status: 409, message: '등록할 수 있는 참여자 수를 넘었습니다.' },
+  HOST_CANNOT_BE_DEACTIVATED: { status: 409, message: '방장은 비활성화할 수 없습니다.' },
+  ALREADY_PARTICIPANT: { status: 409, message: '이미 이 방의 참여자입니다.' },
+  CLAIM_PENDING: {
+    status: 409,
+    message: '방장의 승인을 기다리는 이어받기 요청이 있습니다. 먼저 요청을 취소해 주세요.',
+  },
+  CLAIM_ALREADY_RESOLVED: { status: 409, message: '이미 처리된 이어받기 요청입니다.' },
+  CLAIM_REQUESTER_LINKED: {
+    status: 409,
+    message: '요청한 브라우저가 이미 다른 참여자로 연결되어 있어 요청을 거절했습니다.',
+  },
   VALIDATION_FAILED: { status: 422, message: '입력 값을 확인해 주세요.' },
   // S2 §3.6
+  REQUESTER_INACTIVE: {
+    status: 403,
+    message: '비활성 참여자는 거래를 등록·수정·삭제할 수 없습니다.',
+  },
   NOT_AUTHOR_OR_HOST: { status: 403, message: '작성자나 방장만 할 수 있는 동작입니다.' },
   TRANSACTION_NOT_FOUND: { status: 404, message: '거래를 찾을 수 없습니다.' },
   TRANSACTION_DELETED: { status: 409, message: '이미 삭제된 거래입니다.' },

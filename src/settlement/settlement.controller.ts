@@ -2,10 +2,10 @@ import { Controller, Get, Headers, HttpCode, Post, Query, Res, UseGuards } from 
 import { ApiBody, ApiHeader, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import {
-  CurrentMember,
-  RoomMemberGuard,
-  type RoomMemberContext,
-} from '../common/auth/room-member.guard.js';
+  CurrentRequester,
+  ParticipantGuard,
+  type RequesterContext,
+} from '../common/auth/participant.guard.js';
 import { JsonBody, type BodyInput } from '../common/http/json-body.js';
 import { ApiErrors, ApiIdentityKey, ApiRoomIdParam } from '../common/swagger-docs.js';
 import { SETTLEMENT_SCHEMA, obj } from '../common/swagger-schemas.js';
@@ -16,7 +16,7 @@ type Q = Record<string, string | string[] | undefined | Record<string, unknown>>
 /** S4 게임 종료(BE-S4-3)와 정산 조회(BE-S4-2). 재개·확정·정정 등은 경로를 정의하지 않는다(§4.3). */
 @ApiTags('settlement')
 @Controller('rooms/:roomId')
-@UseGuards(RoomMemberGuard)
+@UseGuards(ParticipantGuard)
 @ApiIdentityKey()
 @ApiRoomIdParam()
 export class SettlementController {
@@ -45,6 +45,7 @@ export class SettlementController {
   })
   @ApiErrors(
     'UNAUTHENTICATED',
+    'IDENTITY_REVOKED',
     'ROOM_NOT_FOUND',
     'HOST_ONLY',
     'VALIDATION_FAILED',
@@ -53,13 +54,13 @@ export class SettlementController {
     'GAME_ENDED',
   )
   async end(
-    @CurrentMember() member: RoomMemberContext,
+    @CurrentRequester() requester: RequesterContext,
     @Headers() headers: Record<string, string | string[] | undefined>,
     @JsonBody() body: BodyInput,
     @Res({ passthrough: true }) res: Response,
   ): Promise<unknown> {
     const reply = await this.settlement.end(
-      { memberId: member.memberId, roomId: member.roomId, isHost: member.isHost },
+      { roomId: requester.participant.roomId, identityKeyHash: requester.identityKeyHash },
       headers,
       body,
     );
@@ -78,11 +79,11 @@ export class SettlementController {
     description: '정산 종류와 항목(없으면 빈 배열)',
     schema: obj({ settlement: SETTLEMENT_SCHEMA }),
   })
-  @ApiErrors('UNAUTHENTICATED', 'ROOM_NOT_FOUND', 'VALIDATION_FAILED')
+  @ApiErrors('UNAUTHENTICATED', 'IDENTITY_REVOKED', 'ROOM_NOT_FOUND', 'VALIDATION_FAILED')
   async get(
-    @CurrentMember() member: RoomMemberContext,
+    @CurrentRequester() requester: RequesterContext,
     @Query() query: Q,
   ): Promise<{ settlement: SettlementDto }> {
-    return { settlement: await this.settlement.settlement(member.roomId, query) };
+    return { settlement: await this.settlement.settlement(requester.participant.roomId, query) };
   }
 }

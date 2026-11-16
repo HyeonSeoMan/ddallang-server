@@ -1,10 +1,10 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import {
-  CurrentMember,
-  RoomMemberGuard,
-  type RoomMemberContext,
-} from '../common/auth/room-member.guard.js';
+  CurrentRequester,
+  ParticipantGuard,
+  type RequesterContext,
+} from '../common/auth/participant.guard.js';
 import type { TransactionDto } from '../common/domain/dto.js';
 import { ApiErrors, ApiIdentityKey, ApiRoomIdParam } from '../common/swagger-docs.js';
 import { BALANCE_SCHEMA, TRANSACTION_SCHEMA, arrayOf, obj } from '../common/swagger-schemas.js';
@@ -15,7 +15,7 @@ type Q = Record<string, string | string[] | undefined | Record<string, unknown>>
 /** S3 조회 API(BE-S3-1~2). 방 상태와 무관하게 방 멤버면 조회할 수 있고 상태를 바꾸지 않는다. */
 @ApiTags('balances')
 @Controller('rooms/:roomId')
-@UseGuards(RoomMemberGuard)
+@UseGuards(ParticipantGuard)
 @ApiIdentityKey()
 @ApiRoomIdParam()
 export class BalancesController {
@@ -31,12 +31,12 @@ export class BalancesController {
     description: '참여자별 순손익(모든 참여자, balance 내림차순·order 오름차순)',
     schema: obj({ balances: arrayOf(BALANCE_SCHEMA) }),
   })
-  @ApiErrors('UNAUTHENTICATED', 'ROOM_NOT_FOUND', 'VALIDATION_FAILED')
+  @ApiErrors('UNAUTHENTICATED', 'IDENTITY_REVOKED', 'ROOM_NOT_FOUND', 'VALIDATION_FAILED')
   async getBalances(
-    @CurrentMember() member: RoomMemberContext,
+    @CurrentRequester() requester: RequesterContext,
     @Query() query: Q,
   ): Promise<{ balances: Balance[] }> {
-    return { balances: await this.balances.balances(member.roomId, query) };
+    return { balances: await this.balances.balances(requester.participant.roomId, query) };
   }
 
   @Get('transactions')
@@ -53,11 +53,11 @@ export class BalancesController {
       nextCursor: { type: 'string', nullable: true },
     }),
   })
-  @ApiErrors('UNAUTHENTICATED', 'ROOM_NOT_FOUND', 'VALIDATION_FAILED')
+  @ApiErrors('UNAUTHENTICATED', 'IDENTITY_REVOKED', 'ROOM_NOT_FOUND', 'VALIDATION_FAILED')
   list(
-    @CurrentMember() member: RoomMemberContext,
+    @CurrentRequester() requester: RequesterContext,
     @Query() query: Q,
   ): Promise<{ transactions: TransactionDto[]; nextCursor: string | null }> {
-    return this.balances.list(member.roomId, query);
+    return this.balances.list(requester.participant.roomId, query);
   }
 }

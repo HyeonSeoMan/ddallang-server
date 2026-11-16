@@ -299,15 +299,20 @@ describe('POST /rooms/{roomId}/transactions (S2 §4.1)', () => {
     ac(
       ['AC-ROOM-004-1', 'AC-ROOM-004-2'],
       'S2 §6.1',
-      '참여자와 무관한 RoomMember가 거래를 쓸 수 있고, 접속자 없는 참여자가 당사자가 될 수 있다',
+      '당사자가 아닌 활성 참여자가 거래를 쓸 수 있고, 신원 없는(직접 추가) 참여자가 당사자가 될 수 있다',
     ),
     async () => {
-      const r = await setupRoom(s.http);
-      const unrelated = await join(s.http, r.c.inviteCode, 'Zed'); // 어떤 Participant와도 무관
-      const res = await postTx(s.http, r.c.roomId, unrelated.key, validBody(r));
+      const r = await setupRoom(s.http); // A·B·C는 직접 추가(신원 없음)
+      const zed = await join(s.http, r.c.inviteCode, 'Zed'); // 거래 당사자가 아닌 참여자
+      const before = await count(s.db, 'Participant', r.c.roomId);
+      const res = await postTx(s.http, r.c.roomId, zed.key, validBody(r));
       expect(res.status).toBe(201);
-      expect(res.body.transaction.authorId).toBe(unrelated.res.body.me.id);
-      expect(await count(s.db, 'RoomMember', r.c.roomId)).toBe(2); // 방장 + Zed: 등록으로 멤버가 늘지 않는다
+      expect(res.body.transaction).toMatchObject({
+        payerId: r.p.a,
+        payeeId: r.p.b,
+        authorId: zed.res.body.me.id, // 작성자는 요청자 참여자 ID
+      });
+      expect(await count(s.db, 'Participant', r.c.roomId)).toBe(before); // 거래가 참여자를 만들지 않는다
     },
   );
 

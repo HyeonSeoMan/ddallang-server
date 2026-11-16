@@ -14,8 +14,8 @@ let participants: string[];
 beforeAll(async () => {
   s = await bootS2();
   r = await setupRoom(s.http);
-  participants = [r.p.a, r.p.b, r.p.c];
-  for (let i = 4; i <= 10; i++)
+  participants = [r.c.hostId, r.p.a, r.p.b, r.p.c]; // 방장도 참여자다
+  for (let i = 5; i <= 10; i++)
     participants.push((await addParticipant(s.http, r.c, `Pp${i}`)).body.participant.id as string);
   // 방당 거래 1,000건(S3 §13): 무작위 당사자 쌍, 일부는 삭제 표시(약 10%)
   await s.db.query(

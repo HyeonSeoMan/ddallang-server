@@ -9,15 +9,29 @@ DDALLANG(정산 보조 서비스) MVP의 **백엔드**입니다. NestJS(Express)
 
 | 문서                     | 버전                                 |
 | ------------------------ | ------------------------------------ |
-| Plan / Tasks / AC 매핑표 | v1.2.0 (`ddallang` `main` `2f5f455`) |
-| PRD                      | v0.5.2                               |
-| S1 방·신원·참여자        | v0.2.3                               |
-| S2 거래 CRUD             | v0.2.2                               |
-| S3 조회·손익             | v0.2.4                               |
-| S5 실시간·연결           | v0.2.3                               |
-| S4 정산·종료             | v0.2.0                               |
+| Plan / Tasks / AC 매핑표 | v2.0.0 (`ddallang` `main` `c52ec81`) |
+| PRD                      | v0.6.0                               |
+| S1 방·신원·참여자        | v0.3.0                               |
+| S2 거래 CRUD             | v0.3.0                               |
+| S3 조회·손익             | v0.3.0                               |
+| S5 실시간·연결           | v0.3.0                               |
+| S4 정산·종료             | v0.3.0                               |
 
-## 개발 현황 (2026-11-13, 시험 631개 통과)
+v2.0.0은 **접속자·참여자 통합**입니다. `RoomMember`가 없어지고 사람 단위는 참여자(`Participant`) 하나이며, 신원 키는 참여자에 연결됩니다. 방을 만든 참여자가 방장이고, 키를 잃은 사람은 방장 승인으로 기존 참여자를 **이어받습니다**. v1.x 데이터는 옮기지 않습니다(배포 순서는 [`docs/g4-evidence.md`](./docs/g4-evidence.md) §7).
+
+## 개발 현황 (2026-11-16, 시험 714개 통과)
+
+### v2.0.0 개정 (Spec v0.3.0, `tasks.md` §J)
+
+| 묶음 | Task                                                                                    | 상태 | 검수                                              |
+| ---- | --------------------------------------------------------------------------------------- | ---- | ------------------------------------------------- |
+| 1    | BE-M1 스키마 이행, BE-M2 신원 상태 해석·인증, BE-M3 S1 엔드포인트 개정                  | 완료 | Codex 1/3 REVISE → 2/3 PASS                       |
+| 2    | BE-M4 이어받기 API 7개·`claim.*` 이벤트                                                 | 완료 | Codex 1/3 PASS                                    |
+| 3    | BE-M5 거래·종료·조회 요청자 개정(`REQUESTER_INACTIVE`, 잠금 안 재확인)                  | 완료 | Codex 1/3 PASS                                    |
+| 4    | BE-M6 `access.revoked`·하트비트 신원 재확인, BE-M7 개정 경합 시험, BE-M8 지연 측정 확장 | 완료 | Codex 1/3·2/3 REVISE → 3/3 PASS                   |
+| 5    | BE-Z2 통합 검증·증거·문서                                                               | 완료 | [`docs/g4-evidence.md`](./docs/g4-evidence.md) §7 |
+
+### v1.x (이력)
 
 | 묶음      | Task                                                                      | 상태 | 검수                                                 |
 | --------- | ------------------------------------------------------------------------- | ---- | ---------------------------------------------------- |
@@ -54,23 +68,30 @@ DDALLANG(정산 보조 서비스) MVP의 **백엔드**입니다. NestJS(Express)
 | 메서드·경로                                           | 설명                                                                                    | 인증        |
 | ----------------------------------------------------- | --------------------------------------------------------------------------------------- | ----------- |
 | `GET /health`                                         | 환경 검증(DB 조회 없음, 비-Spec 경로)                                                   | 없음        |
-| `POST /rooms`                                         | 방 생성(최초 RoomMember가 방장)                                                         | 신원 키     |
-| `GET /rooms/{roomId}`                                 | 방 조회                                                                                 | 방 멤버     |
-| `GET /invites/{inviteCode}`                           | 초대 링크 조회(공개 필드만, `isMember`)                                                 | 선택        |
-| `POST /invites/{inviteCode}/members`                  | 입장(같은 키는 200 복원)                                                                | 신원 키     |
-| `GET /rooms/{roomId}/participants`                    | 참여자 목록                                                                             | 방 멤버     |
-| `POST /rooms/{roomId}/participants`                   | 참여자 등록                                                                             | 방장        |
-| `PATCH /rooms/{roomId}/participants/{participantId}`  | 참여자 활성 상태 변경                                                                   | 방장        |
-| `POST /rooms/{roomId}/transactions`                   | 거래 생성(`Idempotency-Key`·`Idempotency-First-Attempt-At` 필수)                        | 방 멤버     |
+| `POST /rooms`                                         | 방 생성(첫 참여자가 방장, 이 키에 연결)                                                 | 신원 키     |
+| `GET /rooms/{roomId}`                                 | 방 조회(`me`는 요청자 참여자)                                                           | 참여자      |
+| `GET /invites/{inviteCode}`                           | 초대 링크 조회(공개 필드, `identity`·`claim`·`claimableNicknames`)                      | 선택        |
+| `POST /invites/{inviteCode}/members`                  | 입장(연결된 키는 200 복원, 신원 없는 키는 새 참여자 201)                                | 신원 키     |
+| `POST /invites/{inviteCode}/claims`                   | 이어받기 요청(닉네임으로 대상 지정)                                                     | 신원 키     |
+| `GET /invites/{inviteCode}/claims/{claimId}`          | 내 이어받기 요청 조회                                                                   | 요청한 키   |
+| `POST /invites/{inviteCode}/claims/{claimId}/cancel`  | 이어받기 요청 취소                                                                      | 요청한 키   |
+| `GET /rooms/{roomId}/participants`                    | 참여자 목록                                                                             | 참여자      |
+| `POST /rooms/{roomId}/participants`                   | 참여자 직접 추가(신원 없는 참여자)                                                      | 방장        |
+| `PATCH /rooms/{roomId}/participants/{participantId}`  | 참여자 활성 상태 변경(방장 비활성화 금지)                                               | 방장        |
+| `GET /rooms/{roomId}/claims`                          | 대기 중인 이어받기 요청 목록                                                            | 방장        |
+| `GET /rooms/{roomId}/claims/{claimId}`                | 이어받기 요청 단건 조회(끝난 요청 포함)                                                 | 방장        |
+| `POST /rooms/{roomId}/claims/{claimId}/approve`       | 이어받기 승인(이전 키는 접근 상실)                                                      | 방장        |
+| `POST /rooms/{roomId}/claims/{claimId}/reject`        | 이어받기 거절                                                                           | 방장        |
+| `POST /rooms/{roomId}/transactions`                   | 거래 생성(`Idempotency-Key`·`Idempotency-First-Attempt-At` 필수)                        | 참여자      |
 | `PUT /rooms/{roomId}/transactions/{transactionId}`    | 거래 수정(통째 교체, 값이 같으면 no-op, 멱등 헤더 필수)                                 | 작성자·방장 |
 | `DELETE /rooms/{roomId}/transactions/{transactionId}` | 거래 삭제(행을 지우지 않고 표시, 멱등 헤더 필수)                                        | 작성자·방장 |
-| `GET /rooms/{roomId}/transactions`                    | 거래 목록(유효 거래, 20건 키셋 커서, `participantId` 필터)                              | 방 멤버     |
-| `GET /rooms/{roomId}/balances`                        | 누적 손익(모든 참여자, `balance` 내림차순)                                              | 방 멤버     |
-| `GET /rooms/{roomId}/events`                          | 실시간 SSE 스트림(`ready` → 변경 이벤트·`heartbeat`, 연결 한도 RoomMember당 5·방당 50)  | 방 멤버     |
+| `GET /rooms/{roomId}/transactions`                    | 거래 목록(유효 거래, 20건 키셋 커서, `participantId` 필터)                              | 참여자      |
+| `GET /rooms/{roomId}/balances`                        | 누적 손익(모든 참여자, `balance` 내림차순)                                              | 참여자      |
+| `GET /rooms/{roomId}/events`                          | 실시간 SSE 스트림(`ready` → 변경 이벤트·`heartbeat`, 연결 한도 참여자당 5·방당 50)      | 참여자      |
 | `POST /rooms/{roomId}/end`                            | 게임 종료(`Idempotency-*` 필수, 재전송 `Idempotent-Replayed`, 이미 종료면 `GAME_ENDED`) | 방장        |
-| `GET /rooms/{roomId}/settlement`                      | 정산 조회(`EXPECTED` 진행 중·`FINAL` 종료 후, 서버 정렬, 빈 `items: []` 가능)           | 방 멤버     |
+| `GET /rooms/{roomId}/settlement`                      | 정산 조회(`EXPECTED` 진행 중·`FINAL` 종료 후, 서버 정렬, 빈 `items: []` 가능)           | 참여자      |
 
-인증은 `Authorization: Bearer <신원 키(43자 base64url)>`이며 서버는 SHA-256 해시만 저장합니다. 개발 환경(`NODE_ENV=development`)에서 `/api-docs`(Swagger UI)와 `/api-docs-json`이 열립니다.
+인증은 `Authorization: Bearer <신원 키(43자 base64url)>`이며 서버는 SHA-256 해시만 저장합니다. 키는 방마다 참여자 하나에 연결되고, 방 경로에서 연결되지 않은 키(신원 없음·이어받기 대기)는 `404 ROOM_NOT_FOUND`, 이어받기로 끊긴 키는 `401 IDENTITY_REVOKED`입니다. 개발 환경(`NODE_ENV=development`)에서 `/api-docs`(Swagger UI)와 `/api-docs-json`이 열립니다.
 
 ## 시작하기
 
@@ -103,7 +124,8 @@ pnpm build && pnpm start     # 또는 개발 중: pnpm build 후 NODE_ENV=develo
 ```
 src/
   common/      오류·라우트·인증·검증·DB(withRoomLock/withRoomMutation)·로깅·ID
-  rooms/ participants/ transactions/ idempotency/ balances/ realtime/ settlement/
+  rooms/       방·초대·입장, 이어받기(claims)
+  participants/ transactions/ idempotency/ balances/ realtime/ settlement/
   generated/   Prisma 클라이언트(자동 생성, Git 제외)
 prisma/        스키마와 SQL 마이그레이션
 scripts/       ac-check.mjs
@@ -116,6 +138,7 @@ test/          계약·동시성·제약 시험, 다중 프로세스 하네스(t
 
 - **방 단위 직렬화**: 방을 바꾸는 요청은 `withRoomLock`에서 방 행에 `FOR UPDATE` 잠금을 하나만 잡습니다(커밋까지 유지, `lock_timeout`·`statement_timeout`). 요청 마감은 호출 시점부터의 절대 시각입니다.
 - **변경 번호와 알림**: `withRoomMutation`은 변경이 실제로 있을 때만 `Room.revision`을 1 올리고 같은 트랜잭션에서 `pg_notify('room_events', …)`를 보냅니다(커밋될 때만 전달).
+- **신원 상태**: `resolveIdentity`가 (방, 키 해시)를 한 질의로 연결됨·접근 상실·대기·없음 중 하나로 판정합니다(PD-23). 가드는 잠금 밖의 1차 판정이고, 변경 요청은 방 잠금을 얻은 뒤 다시 판정합니다(PD-24). 이어받기 승인은 한 트랜잭션에서 이전 키를 접근 상실로 기록하고 새 키를 연결하며, 이전 키의 스트림에는 `access.revoked`를 보내고 닫습니다(PD-27).
 - **오류 형식**: `{ error: { code, message, details[] } }`. 라우트 판정(404 `ROUTE_NOT_FOUND`, 405 `NOT_SUPPORTED`+`Allow`)은 인증과 Swagger보다 앞서며, 본문 JSON 파싱 실패는 검증 차례(422)에서 판정합니다.
 - **시험**: 시험마다 임시 스키마(`search_path`와 Prisma `schema`)를 만들고, 서버를 별도 프로세스 2개 이상 띄워 같은 DB에서 동시성을 검증합니다.
 
@@ -147,7 +170,7 @@ test/          계약·동시성·제약 시험, 다중 프로세스 하네스(t
 - 멱등 기록 정리(`expiresAt + 1시간` 이후 삭제)는 10분 주기 작업이며 `test` 환경에서는 돌지 않습니다.
 - `REQUEST_TIMEOUT_MS`는 DB 트랜잭션 마감에만 연결되어 있고 HTTP 서버의 요청 제한과는 아직 연결되지 않았습니다(오류 코드·소유 Task 미정).
 - 운영(실사용자) 배포 환경(PD-16)과 방 보관·삭제(OQ-034)는 정하지 않았습니다. 현재 배포는 무료 플랜 시연용입니다([`docs/deploy-free.md`](./docs/deploy-free.md)).
-- `prisma migrate deploy`는 컨테이너 시작 때 실행되며 로컬 컨테이너와 Render·Supabase에서 6건 적용을 확인했습니다. 시험은 SQL을 직접 적용합니다.
+- `prisma migrate deploy`는 컨테이너 시작 때 실행됩니다. v1.x 6건은 로컬 컨테이너와 Render·Supabase에서 적용을 확인했습니다. **v2 마이그레이션(`20261116000000_v2_participant_identity`)은 방이 하나라도 있으면 실패하도록 만들었고 배포 DB에는 아직 적용하지 않았습니다.** 배포 DB 적용은 데이터 삭제이므로 사용자 승인 뒤 프론트엔드 2.0.0과 같은 시점에 합니다(절차는 [`docs/g4-evidence.md`](./docs/g4-evidence.md) §7.6). 시험은 SQL을 직접 적용합니다.
 - 문서에 반영할 목록(ddallang 문서 PR 예정)은 [`docs/g4-evidence.md`](./docs/g4-evidence.md) §5에 모아 두었습니다(개발 CORS 기본값, `INTERNAL_ERROR`, 잘못된 JSON·경로의 응답, 금액 `INVALID_VALUE`, `RequestTimeoutError` 매핑, 임대·하트비트 기본값, 종료 만료 메시지, 22자가 아닌 거래 ID 응답 등).
 - 시간 의존 시험이 간헐적으로 실패하던 원인(시험 간 공유 채널의 형식이 틀린 통지)은 고쳤고, 전체 시험은 연속 두 번 통과했습니다. 반복 안정성 통계는 없습니다.
 - 지연 측정은 같은 호스트·로컬 DB 기준이며 왕복 150ms 조건과 브라우저 렌더링은 포함하지 않습니다.

@@ -141,7 +141,7 @@ describe('종료 동시성 (BE-S4-4, 프로세스 3개)', () => {
             r.roomId,
           ])
         )[0]!.n;
-        expect(Number(n)).toBe(add.status === 201 ? 4 : 3);
+        expect(Number(n)).toBe(add.status === 201 ? 5 : 4); // 방장 + P0~P2 (+ Z)
         // 상태 변경은 성공했을 때만 반영된다
         const st0 = (
           await q<{ status: string }>(`SELECT "status" FROM "Participant" WHERE "id"=$1`, [r.p[0]])

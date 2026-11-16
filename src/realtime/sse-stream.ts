@@ -68,6 +68,17 @@ export class SseStream {
     this.write(msg);
   }
 
+  /**
+   * 마지막 메시지를 보내고 닫는다(`access.revoked`, S5 §6.2). `ready` 전이어도 붙잡아 둔 이벤트를 버리고 이것만 보낸다.
+   * 막힌 소켓이면 대기열 뒤에 붙여 flush를 기다리지 않고 닫는다(전달은 최선 노력, 놓치면 재연결이 401을 받는다).
+   */
+  sendFinal(msg: SseMessage): void {
+    if (this.closed) return;
+    this.held = undefined;
+    this.write(msg);
+    this.close();
+  }
+
   private write(msg: SseMessage): void {
     if (this.closed) return;
     if (!this.lease.alive()) {

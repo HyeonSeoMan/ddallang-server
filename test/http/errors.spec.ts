@@ -5,20 +5,27 @@ import { ErrorFixture } from '../fixtures/http-fixtures.js';
 import { bootFixtureApp, type FixtureApp } from '../helpers/fixture-app.js';
 import { expectApiError } from '../helpers/contract.js';
 
-// Spec의 오류 코드 표를 그대로 옮긴 기대값: S1 §3.4, S2 §3.6, S5 §3.3.
+// Spec의 오류 코드 표를 그대로 옮긴 기대값: S1 §3.4, S2 §3.6, S5 §3.3 (v0.3.0). v0.2.3의 MEMBER_LIMIT_EXCEEDED는 없다.
 const SPEC_TABLE: Record<string, number> = {
   UNAUTHENTICATED: 401,
+  IDENTITY_REVOKED: 401,
   HOST_ONLY: 403,
   ROOM_NOT_FOUND: 404,
   INVITE_NOT_FOUND: 404,
   PARTICIPANT_NOT_FOUND: 404,
+  CLAIM_NOT_FOUND: 404,
   ROUTE_NOT_FOUND: 404,
   NOT_SUPPORTED: 405,
   GAME_ENDED: 409,
   NICKNAME_TAKEN: 409,
-  MEMBER_LIMIT_EXCEEDED: 409,
   PARTICIPANT_LIMIT_EXCEEDED: 409,
+  HOST_CANNOT_BE_DEACTIVATED: 409,
+  ALREADY_PARTICIPANT: 409,
+  CLAIM_PENDING: 409,
+  CLAIM_ALREADY_RESOLVED: 409,
+  CLAIM_REQUESTER_LINKED: 409,
   VALIDATION_FAILED: 422,
+  REQUESTER_INACTIVE: 403,
   NOT_AUTHOR_OR_HOST: 403,
   TRANSACTION_NOT_FOUND: 404,
   TRANSACTION_DELETED: 409,

@@ -1,5 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import type request from 'supertest';
+import { hashIdentityKey } from '../../src/common/auth/identity-key.js';
+import { newId } from '../../src/common/ids/ids.js';
 import { bootTestApp, type TestApp } from '../helpers/app.js';
 import { createIsolatedDb, type IsolatedDb } from '../helpers/isolated-db.js';
 
@@ -70,7 +72,7 @@ export async function endRoom(db: IsolatedDb, roomId: string) {
 
 export async function count(
   db: IsolatedDb,
-  table: 'Room' | 'RoomMember' | 'Participant',
+  table: 'Room' | 'Participant' | 'ClaimRequest' | 'RevokedIdentity',
   roomId?: string,
 ) {
   const where = roomId
@@ -87,4 +89,35 @@ export async function revision(db: IsolatedDb, roomId: string) {
   return (
     await db.query<{ revision: number }>(`SELECT "revision" FROM "Room" WHERE "id"=$1`, [roomId])
   )[0]!.revision;
+}
+
+/**
+ * 시험 픽스처: 이어받기 API(BE-M4)를 거치지 않고 신원 상태를 만든다. 대기(PENDING) 요청 하나.
+ * 정상 경로로 만들 수 없는 경합 상태(AC-ROOM-009-14)의 재현에도 쓴다.
+ */
+export async function pendingClaimFixture(
+  db: IsolatedDb,
+  roomId: string,
+  participantId: string,
+  key: string,
+): Promise<string> {
+  const id = newId();
+  await db.query(
+    `INSERT INTO "ClaimRequest" ("id","roomId","participantId","requesterKeyHash") VALUES ($1,$2,$3,$4)`,
+    [id, roomId, participantId, hashIdentityKey(key)],
+  );
+  return id;
+}
+
+/** 시험 픽스처: 이 키를 접근 상실(REVOKED)로 기록한다. */
+export async function revokeFixture(
+  db: IsolatedDb,
+  roomId: string,
+  participantId: string,
+  key: string,
+): Promise<void> {
+  await db.query(
+    `INSERT INTO "RevokedIdentity" ("roomId","keyHash","participantId") VALUES ($1,$2,$3)`,
+    [roomId, hashIdentityKey(key), participantId],
+  );
 }

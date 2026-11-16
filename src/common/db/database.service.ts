@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { Prisma } from '../../generated/prisma/client.js';
 import type { Env } from '../config/env.js';
+import type { ApiError } from '../errors/api-error.js';
 import { PrismaService } from './prisma.service.js';
 
 export type DbTx = Prisma.TransactionClient;
@@ -10,19 +11,33 @@ export type DbTimeouts = Pick<
   'DB_LOCK_TIMEOUT_MS' | 'DB_STATEMENT_TIMEOUT_MS' | 'REQUEST_TIMEOUT_MS'
 >;
 
-/** S5 §4.2 이벤트 종류와 식별자. 내용(금액·사유·닉네임 등)은 싣지 않는다(R-I3). */
+/**
+ * S5 §4.2 이벤트 종류와 식별자. 내용(금액·사유·닉네임 등)은 싣지 않는다(R-I3).
+ * `revokedParticipantId`는 클라이언트에 보내지 않는 **내부 필드**다(PD-26): 이어받기 승인이 이전 키를 끊었을 때만
+ * 실어 각 인스턴스가 그 참여자의 스트림에 `access.revoked`를 보내게 한다(PD-27). 키 해시는 통지에 싣지 않는다.
+ */
 export type RoomEvent =
   | {
       event: 'transaction.created' | 'transaction.updated' | 'transaction.deleted';
       transactionId: string;
     }
   | { event: 'participant.created' | 'participant.status_changed'; participantId: string }
+  | { event: 'claim.created' | 'claim.canceled'; claimId: string }
+  | { event: 'claim.resolved'; claimId: string; revokedParticipantId?: string }
   | { event: 'room.ended' };
 
-/** 변경 콜백의 결과. `event`가 있을 때만(변경이 실제로 있을 때만) `revision`을 소비하고 통지한다. */
+/** 통지에만 있고 SSE `data`에는 싣지 않는 필드(PD-26). */
+export const INTERNAL_EVENT_FIELDS = ['revokedParticipantId'] as const;
+
+/**
+ * 변경 콜백의 결과. `event`가 있을 때만(변경이 실제로 있을 때만) `revision`을 소비하고 통지한다.
+ * `afterCommitError`가 있으면 변경을 **커밋한 뒤** 그 오류로 응답한다(PD-25). 거부하면서 상태를 바꾸는 유일한
+ * 경우인 `CLAIM_REQUESTER_LINKED`(S1 §2.3 I9)만 쓴다. 그 밖의 거부는 던져서 롤백한다.
+ */
 export interface MutationOutcome<T> {
   value: T;
   event?: RoomEvent;
+  afterCommitError?: ApiError;
 }
 
 /** PD-5: 모든 방 변경 통지가 오가는 PostgreSQL 채널. */
@@ -78,23 +93,25 @@ export class DatabaseService {
    * `Room.revision` + 1 → 같은 트랜잭션에서 `pg_notify` → 커밋. PostgreSQL은 통지를 커밋될 때만 전달하므로
    * 커밋 전에 나가거나 롤백된 변경의 이벤트가 나가는 일이 없다. 거부(콜백이 던짐)·멱등 재전송·값이 같은
    * 변경(`event` 없음)은 `revision`을 소비하지 않고 통지하지 않는다. 통지에는 식별자와 종류만 싣는다.
-   * 반환의 `revision`은 소비했을 때만 값이 있다.
+   * 반환의 `revision`은 소비했을 때만 값이 있다. `afterCommitError`는 커밋이 끝난 뒤 던진다(PD-25).
    */
   async withRoomMutation<T>(
     roomId: string,
     fn: (tx: DbTx) => Promise<MutationOutcome<T>>,
   ): Promise<{ value: T; revision: number | null }> {
-    return this.withRoomLock(roomId, async (tx) => {
-      const { value, event } = await fn(tx);
-      if (!event) return { value, revision: null };
+    const result = await this.withRoomLock(roomId, async (tx) => {
+      const { value, event, afterCommitError } = await fn(tx);
+      if (!event) return { value, revision: null, afterCommitError };
       const rows = await tx.$queryRaw<{ revision: number }[]>`
         UPDATE "Room" SET "revision" = "revision" + 1 WHERE "id" = ${roomId} RETURNING "revision"`;
       const revision = rows[0]!.revision;
       const serverTime = (await this.dbNow(tx)).toISOString();
       const payload = JSON.stringify({ ...event, roomId, revision, serverTime });
       await tx.$executeRaw`SELECT pg_notify(${ROOM_EVENTS_CHANNEL}, ${payload})`;
-      return { value, revision };
+      return { value, revision, afterCommitError };
     });
+    if (result.afterCommitError) throw result.afterCommitError;
+    return { value: result.value, revision: result.revision };
   }
 
   /** 방 잠금 없이 한 시점의 일관된 읽기(REPEATABLE READ, READ ONLY). 쓰기를 막지 않는다. */

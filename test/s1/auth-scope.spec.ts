@@ -41,7 +41,7 @@ describe('권한 우회 거부 (S1 API, FR-SYS-003)', () => {
       const c = await createRoom(s.http);
       const stranger = newKey();
       const before = {
-        members: await count(s.db, 'RoomMember', c.roomId),
+        claims: await count(s.db, 'ClaimRequest', c.roomId),
         parts: await count(s.db, 'Participant', c.roomId),
         rev: await revision(s.db, c.roomId),
       };
@@ -80,7 +80,7 @@ describe('권한 우회 거부 (S1 API, FR-SYS-003)', () => {
       await reject(await s.http.get('/nope'), 404, 'ROUTE_NOT_FOUND');
       expect(codes.size).toBe(5);
       expect({
-        members: await count(s.db, 'RoomMember', c.roomId),
+        claims: await count(s.db, 'ClaimRequest', c.roomId),
         parts: await count(s.db, 'Participant', c.roomId),
         rev: await revision(s.db, c.roomId),
       }).toEqual(before);
@@ -91,7 +91,7 @@ describe('권한 우회 거부 (S1 API, FR-SYS-003)', () => {
     ac(
       ['AC-SYS-003-6', 'AC-SYS-003-7'],
       'S1 §3.1',
-      '다른 방에 등록된 신원 키(방장 키 포함)는 이 방에서 조회·변경 모두 404이며 아무것도 바뀌지 않는다',
+      '다른 방에 연결된 신원 키(방장 키 포함)는 이 방에서 조회·변경 모두 404이며 아무것도 바뀌지 않는다',
     ),
     async () => {
       const a = await createRoom(s.http, { nickname: 'HostA' });
@@ -113,11 +113,10 @@ describe('권한 우회 거부 (S1 API, FR-SYS-003)', () => {
       ]) {
         expectApiError(res, 404, 'ROOM_NOT_FOUND'); // 403 HOST_ONLY가 아니라 비멤버 404
       }
-      expect(await count(s.db, 'Participant', b.roomId)).toBe(1);
-      expect(
-        (await s.http.get(`/rooms/${b.roomId}/participants`).set(auth(b.key))).body.participants[0]
-          .status,
-      ).toBe('ACTIVE');
+      expect(await count(s.db, 'Participant', b.roomId)).toBe(2); // 방장 + PB
+      const list = (await s.http.get(`/rooms/${b.roomId}/participants`).set(auth(b.key))).body
+        .participants as { id: string; status: string }[];
+      expect(list.find((x) => x.id === p.id)!.status).toBe('ACTIVE');
     },
   );
 });

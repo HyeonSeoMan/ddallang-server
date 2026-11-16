@@ -76,7 +76,7 @@ afterAll(async () => {
   await db?.drop();
 });
 
-describe('S1 동시성·한도 (서로 다른 프로세스 2개, 같은 DB)', () => {
+describe('S1 동시성·한도 (서로 다른 프로세스 2개, 같은 DB, v2.0.0 개정 BE-M3)', () => {
   it(
     ac(
       ['AC-ROOM-006-11'],
@@ -89,7 +89,7 @@ describe('S1 동시성·한도 (서로 다른 프로세스 2개, 같은 DB)', ()
         Array.from({ length: 9 }, (_, i) => joinAs(i, r.code, 'Same')),
       );
       expect(tally(results)).toEqual({ '201': 1, '409 NICKNAME_TAKEN': 8 });
-      expect(await n('RoomMember', r.roomId)).toBe(2); // 방장 + 1
+      expect(await n('Participant', r.roomId)).toBe(2); // 방장 + 1
     },
   );
 
@@ -97,7 +97,7 @@ describe('S1 동시성·한도 (서로 다른 프로세스 2개, 같은 DB)', ()
     ac(
       ['AC-ROOM-006-11'],
       'S1 §4.3',
-      '같은 키로 동시에 입장 → 한 명만 만들어지고 나머지는 200으로 같은 RoomMember를 복원한다',
+      '같은 키로 동시에 입장 → 한 명만 만들어지고 나머지는 200으로 같은 참여자를 복원한다',
     ),
     async () => {
       const r = await room();
@@ -107,7 +107,7 @@ describe('S1 동시성·한도 (서로 다른 프로세스 2개, 같은 DB)', ()
       );
       expect(tally(results)).toEqual({ '201': 1, '200': 7 });
       expect(new Set(results.map((x) => x.body.me.id)).size).toBe(1);
-      expect(await n('RoomMember', r.roomId)).toBe(2);
+      expect(await n('Participant', r.roomId)).toBe(2);
     },
   );
 
@@ -115,7 +115,7 @@ describe('S1 동시성·한도 (서로 다른 프로세스 2개, 같은 DB)', ()
     ac(
       ['AC-ROOM-008-5', 'AC-ROOM-008-4'],
       'S1 §6.4',
-      'RoomMember 마지막 슬롯에 서로 다른 신원 6개가 동시 도착 → 정확히 하나만 슬롯을 얻고 나머지는 MEMBER_LIMIT_EXCEEDED, 한도를 넘지 않는다',
+      '마지막 슬롯에 서로 다른 키의 입장 6개가 동시 도착 → 정확히 하나만 슬롯을 얻고 나머지는 PARTICIPANT_LIMIT_EXCEEDED, 한도를 넘지 않는다',
     ),
     async () => {
       const r = await room(); // 방장 1명
@@ -123,8 +123,8 @@ describe('S1 동시성·한도 (서로 다른 프로세스 2개, 같은 DB)', ()
       const results = await Promise.all(
         Array.from({ length: 6 }, (_, i) => joinAs(i, r.code, `late${i}`)),
       );
-      expect(tally(results)).toEqual({ '201': 1, '409 MEMBER_LIMIT_EXCEEDED': 5 });
-      expect(await n('RoomMember', r.roomId)).toBe(10);
+      expect(tally(results)).toEqual({ '201': 1, '409 PARTICIPANT_LIMIT_EXCEEDED': 5 });
+      expect(await n('Participant', r.roomId)).toBe(10);
       for (const x of results.filter((x) => x.status === 409))
         expect(x.body.error.details).toEqual([{ limit: 10 }]);
     },
@@ -134,11 +134,11 @@ describe('S1 동시성·한도 (서로 다른 프로세스 2개, 같은 DB)', ()
     ac(
       ['AC-ROOM-008-5', 'AC-ROOM-008-4'],
       'S1 §6.4',
-      'Participant 마지막 슬롯 경쟁 → 정확히 하나만 성공, 나머지 PARTICIPANT_LIMIT_EXCEEDED',
+      '마지막 슬롯에 직접 추가 6개 동시 → 정확히 하나만 성공, 나머지 PARTICIPANT_LIMIT_EXCEEDED',
     ),
     async () => {
       const r = await room();
-      for (let i = 0; i < 9; i++) expect((await register(i, r, `p${i}`)).status).toBe(201);
+      for (let i = 0; i < 8; i++) expect((await register(i, r, `p${i}`)).status).toBe(201); // 방장 + 8 = 9
       const results = await Promise.all(
         Array.from({ length: 6 }, (_, i) => register(i, r, `last${i}`)),
       );
@@ -151,16 +151,20 @@ describe('S1 동시성·한도 (서로 다른 프로세스 2개, 같은 DB)', ()
     ac(
       ['AC-PART-001-5'],
       'S1 §7 3',
-      '서로 다른 닉네임 10개를 동시 등록 → order가 모두 다르고(1~10) 저장 순서와 일치한다',
+      '서로 다른 닉네임의 입장·직접 추가 9개 동시 → 모두 201, order가 모두 다르고(2~10) 저장 순서와 일치한다',
     ),
     async () => {
       const r = await room();
       const results = await Promise.all(
-        Array.from({ length: 10 }, (_, i) => register(i, r, `p${i}`)),
+        Array.from({ length: 9 }, (_, i) =>
+          i % 2 ? register(i, r, `p${i}`) : joinAs(i, r.code, `j${i}`),
+        ),
       );
-      expect(tally(results)).toEqual({ '201': 10 });
-      const orders = results.map((x) => x.body.participant.order as number).sort((a, b) => a - b);
-      expect(orders).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+      expect(tally(results)).toEqual({ '201': 9 });
+      const orders = results
+        .map((x) => (x.body.participant ?? x.body.me).order as number)
+        .sort((a, b) => a - b);
+      expect(orders).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 10]);
       const rows = await db.query<{ order: number; createdAt: Date }>(
         `SELECT "order","createdAt" FROM "Participant" WHERE "roomId"=$1 ORDER BY "order"`,
         [r.roomId],
@@ -170,13 +174,13 @@ describe('S1 동시성·한도 (서로 다른 프로세스 2개, 같은 DB)', ()
           rows[i - 1]!.createdAt.getTime(),
         ); // 저장 순서 = order 순서
       }
-      // revision은 등록 10건 = 10, 번호가 비지 않는다
+      // revision은 참여자 생성 9건 = 9, 번호가 비지 않는다
       const rev = (
         await db.query<{ revision: number }>(`SELECT "revision" FROM "Room" WHERE "id"=$1`, [
           r.roomId,
         ])
       )[0]!.revision;
-      expect(rev).toBe(10);
+      expect(rev).toBe(9);
     },
   );
 
@@ -201,18 +205,14 @@ describe('S1 동시성·한도 (서로 다른 프로세스 2개, 같은 DB)', ()
     ac(
       ['AC-ROOM-008-6', 'AC-ROOM-008-7', 'AC-ROOM-008-8', 'AC-ROOM-008-2'],
       'S1 §6.4',
-      '비활성 참여자·소실된 신원·접속하지 않은 RoomMember도 한도에 포함된다',
+      '비활성 참여자·키를 잃은 입장자·신원 없는 참여자도 한도에 포함된다',
     ),
     async () => {
       const r = await room();
-      // RoomMember: 키를 버린(소실) 입장자도 센다
-      for (let i = 0; i < 9; i++) expect((await joinAs(i, r.code, `lost${i}`)).status).toBe(201);
-      const eleventh = await joinAs(0, r.code, 'newcomer');
-      expect(eleventh.status).toBe(409);
-      expect(eleventh.body.error.code).toBe('MEMBER_LIMIT_EXCEEDED');
-      // Participant: 10명 중 1명을 비활성화해도 11번째는 거부된다
+      // 키를 버린(소실) 입장자 4명과 신원 없는 직접 추가 5명: 방장 포함 10명
+      for (let i = 0; i < 4; i++) expect((await joinAs(i, r.code, `lost${i}`)).status).toBe(201);
       const created: Res[] = [];
-      for (let i = 0; i < 10; i++) created.push(await register(i, r, `q${i}`));
+      for (let i = 0; i < 5; i++) created.push(await register(i, r, `q${i}`));
       const first = created[0]!.body.participant.id as string;
       expect(
         (
@@ -221,6 +221,10 @@ describe('S1 동시성·한도 (서로 다른 프로세스 2개, 같은 DB)', ()
           })
         ).status,
       ).toBe(200);
+      // 10명 중 1명을 비활성화해도 입장·직접 추가는 거부된다
+      const eleventh = await joinAs(0, r.code, 'newcomer');
+      expect(eleventh.status).toBe(409);
+      expect(eleventh.body.error.code).toBe('PARTICIPANT_LIMIT_EXCEEDED');
       const eleventhP = await register(1, r, 'q10');
       expect(eleventhP.status).toBe(409);
       expect(eleventhP.body.error.code).toBe('PARTICIPANT_LIMIT_EXCEEDED');
@@ -253,7 +257,7 @@ describe('S1 동시성·한도 (서로 다른 프로세스 2개, 같은 DB)', ()
     ac(
       ['AC-ROOM-006-11'],
       'S1 §3.3',
-      '같은 키로 잠금 대기 중에 다른 요청이 RoomMember를 만들면, 본문이 잘못된 입장도 검증(422)보다 복원(200)이 앞선다',
+      '같은 키로 잠금 대기 중에 다른 요청이 그 키의 참여자를 만들면, 본문이 잘못된 입장도 검증(422)보다 복원(200)이 앞선다',
     ),
     async () => {
       const r = await room();
@@ -268,8 +272,8 @@ describe('S1 동시성·한도 (서로 다른 프로세스 2개, 같은 DB)', ()
         const pending = fx(at(0), 'POST', `/invites/${r.code}/members`, key, {}); // 본문에 nickname 없음
         await new Promise((ok) => setTimeout(ok, 500)); // 요청이 방 잠금 앞에서 기다리는 상태
         await holder.query(
-          `INSERT INTO "RoomMember" ("id","roomId","nickname","nicknameKey","isHost","identityKeyHash")
-           VALUES ($1,$2,'Twin','twin',false,$3)`,
+          `INSERT INTO "Participant" ("id","roomId","nickname","nicknameKey","order","identityKeyHash")
+           VALUES ($1,$2,'Twin','twin',99,$3)`,
           [newId(), r.roomId, hashIdentityKey(key)],
         );
         await holder.query('COMMIT');

@@ -13,7 +13,7 @@ export interface StoredResponse {
 
 export interface LookupInput {
   roomId: string;
-  memberId: string;
+  participantId: string;
   key: string;
   /** `Idempotency-First-Attempt-At` 헤더 값 */
   firstAttemptAt: Date;
@@ -42,7 +42,11 @@ export class IdempotencyService {
   async lookup(tx: DbTx, input: LookupInput): Promise<StoredResponse | undefined> {
     const record = await tx.idempotencyRecord.findUnique({
       where: {
-        roomId_memberId_key: { roomId: input.roomId, memberId: input.memberId, key: input.key },
+        roomId_participantId_key: {
+          roomId: input.roomId,
+          participantId: input.participantId,
+          key: input.key,
+        },
       },
     });
     const effectiveFirst = record
@@ -67,7 +71,7 @@ export class IdempotencyService {
       data: {
         id: newId(),
         roomId: input.roomId,
-        memberId: input.memberId,
+        participantId: input.participantId,
         key: input.key,
         operation: input.operation,
         fingerprint: input.fingerprint,
