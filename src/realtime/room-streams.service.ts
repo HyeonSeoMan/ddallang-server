@@ -1,4 +1,5 @@
 import { Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
+import { INTERNAL_EVENT_FIELDS } from '../common/db/database.service.js';
 import { PrismaService } from '../common/db/prisma.service.js';
 import { RoomEventBus, type RoomEventPayload } from './room-event-bus.js';
 import type { SseStream } from './sse-stream.js';
@@ -82,9 +83,13 @@ export class RoomStreamsService implements OnModuleDestroy {
     }
   }
 
-  /** 이벤트 `data`에는 종류(event)를 빼고 `roomId`·`revision`·`serverTime`·식별자만 싣는다(내용 없음, S5 §4.2). */
+  /**
+   * 이벤트 `data`에는 종류(event)를 빼고 `roomId`·`revision`·`serverTime`·식별자만 싣는다(내용 없음, S5 §4.2).
+   * 통지의 내부 필드(`revokedParticipantId`, PD-26)도 뺀다.
+   */
   private dispatch(streams: Set<SseStream>, payload: RoomEventPayload): void {
     const { event, ...data } = payload;
+    for (const field of INTERNAL_EVENT_FIELDS) delete data[field];
     for (const stream of [...streams]) stream.send({ event, id: payload.revision, data });
   }
 

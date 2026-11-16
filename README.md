@@ -54,21 +54,28 @@ DDALLANG(정산 보조 서비스) MVP의 **백엔드**입니다. NestJS(Express)
 | 메서드·경로                                           | 설명                                                                                    | 인증        |
 | ----------------------------------------------------- | --------------------------------------------------------------------------------------- | ----------- |
 | `GET /health`                                         | 환경 검증(DB 조회 없음, 비-Spec 경로)                                                   | 없음        |
-| `POST /rooms`                                         | 방 생성(최초 RoomMember가 방장)                                                         | 신원 키     |
-| `GET /rooms/{roomId}`                                 | 방 조회                                                                                 | 방 멤버     |
-| `GET /invites/{inviteCode}`                           | 초대 링크 조회(공개 필드만, `isMember`)                                                 | 선택        |
-| `POST /invites/{inviteCode}/members`                  | 입장(같은 키는 200 복원)                                                                | 신원 키     |
-| `GET /rooms/{roomId}/participants`                    | 참여자 목록                                                                             | 방 멤버     |
-| `POST /rooms/{roomId}/participants`                   | 참여자 등록                                                                             | 방장        |
-| `PATCH /rooms/{roomId}/participants/{participantId}`  | 참여자 활성 상태 변경                                                                   | 방장        |
-| `POST /rooms/{roomId}/transactions`                   | 거래 생성(`Idempotency-Key`·`Idempotency-First-Attempt-At` 필수)                        | 방 멤버     |
+| `POST /rooms`                                         | 방 생성(첫 참여자가 방장, 이 키에 연결)                                                 | 신원 키     |
+| `GET /rooms/{roomId}`                                 | 방 조회(`me`는 요청자 참여자)                                                           | 참여자      |
+| `GET /invites/{inviteCode}`                           | 초대 링크 조회(공개 필드, `identity`·`claim`·`claimableNicknames`)                      | 선택        |
+| `POST /invites/{inviteCode}/members`                  | 입장(연결된 키는 200 복원, 신원 없는 키는 새 참여자 201)                                | 신원 키     |
+| `POST /invites/{inviteCode}/claims`                   | 이어받기 요청(닉네임으로 대상 지정)                                                     | 신원 키     |
+| `GET /invites/{inviteCode}/claims/{claimId}`          | 내 이어받기 요청 조회                                                                   | 요청한 키   |
+| `POST /invites/{inviteCode}/claims/{claimId}/cancel`  | 이어받기 요청 취소                                                                      | 요청한 키   |
+| `GET /rooms/{roomId}/participants`                    | 참여자 목록                                                                             | 참여자      |
+| `POST /rooms/{roomId}/participants`                   | 참여자 직접 추가(신원 없는 참여자)                                                      | 방장        |
+| `PATCH /rooms/{roomId}/participants/{participantId}`  | 참여자 활성 상태 변경(방장 비활성화 금지)                                               | 방장        |
+| `GET /rooms/{roomId}/claims`                          | 대기 중인 이어받기 요청 목록                                                            | 방장        |
+| `GET /rooms/{roomId}/claims/{claimId}`                | 이어받기 요청 단건 조회(끝난 요청 포함)                                                 | 방장        |
+| `POST /rooms/{roomId}/claims/{claimId}/approve`       | 이어받기 승인(이전 키는 접근 상실)                                                      | 방장        |
+| `POST /rooms/{roomId}/claims/{claimId}/reject`        | 이어받기 거절                                                                           | 방장        |
+| `POST /rooms/{roomId}/transactions`                   | 거래 생성(`Idempotency-Key`·`Idempotency-First-Attempt-At` 필수)                        | 참여자      |
 | `PUT /rooms/{roomId}/transactions/{transactionId}`    | 거래 수정(통째 교체, 값이 같으면 no-op, 멱등 헤더 필수)                                 | 작성자·방장 |
 | `DELETE /rooms/{roomId}/transactions/{transactionId}` | 거래 삭제(행을 지우지 않고 표시, 멱등 헤더 필수)                                        | 작성자·방장 |
-| `GET /rooms/{roomId}/transactions`                    | 거래 목록(유효 거래, 20건 키셋 커서, `participantId` 필터)                              | 방 멤버     |
-| `GET /rooms/{roomId}/balances`                        | 누적 손익(모든 참여자, `balance` 내림차순)                                              | 방 멤버     |
-| `GET /rooms/{roomId}/events`                          | 실시간 SSE 스트림(`ready` → 변경 이벤트·`heartbeat`, 연결 한도 RoomMember당 5·방당 50)  | 방 멤버     |
+| `GET /rooms/{roomId}/transactions`                    | 거래 목록(유효 거래, 20건 키셋 커서, `participantId` 필터)                              | 참여자      |
+| `GET /rooms/{roomId}/balances`                        | 누적 손익(모든 참여자, `balance` 내림차순)                                              | 참여자      |
+| `GET /rooms/{roomId}/events`                          | 실시간 SSE 스트림(`ready` → 변경 이벤트·`heartbeat`, 연결 한도 참여자당 5·방당 50)      | 참여자      |
 | `POST /rooms/{roomId}/end`                            | 게임 종료(`Idempotency-*` 필수, 재전송 `Idempotent-Replayed`, 이미 종료면 `GAME_ENDED`) | 방장        |
-| `GET /rooms/{roomId}/settlement`                      | 정산 조회(`EXPECTED` 진행 중·`FINAL` 종료 후, 서버 정렬, 빈 `items: []` 가능)           | 방 멤버     |
+| `GET /rooms/{roomId}/settlement`                      | 정산 조회(`EXPECTED` 진행 중·`FINAL` 종료 후, 서버 정렬, 빈 `items: []` 가능)           | 참여자      |
 
 인증은 `Authorization: Bearer <신원 키(43자 base64url)>`이며 서버는 SHA-256 해시만 저장합니다. 개발 환경(`NODE_ENV=development`)에서 `/api-docs`(Swagger UI)와 `/api-docs-json`이 열립니다.
 

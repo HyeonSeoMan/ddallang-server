@@ -40,8 +40,8 @@ export class EventsController {
       '실시간 스트림 (S5 §4.1): fetch로 연다(EventSource 아님). ready → 변경 이벤트·heartbeat',
     description:
       '`text/event-stream`. 서버는 헤더를 보낸 즉시 `ready{roomId, revision, serverTime}`를 보내고, 변경이 커밋되면 ' +
-      '`id: <revision>` · `event: transaction.created|updated|deleted · participant.created|status_changed · room.ended` · ' +
-      '`data: {roomId, revision, serverTime, transactionId|participantId}`를 보낸다. 15초마다 `heartbeat{roomId, revision, serverTime}`. ' +
+      '`id: <revision>` · `event: transaction.created|updated|deleted · participant.created|status_changed · claim.created|canceled|resolved · room.ended` · ' +
+      '`data: {roomId, revision, serverTime, transactionId|participantId|claimId}`를 보낸다. 15초마다 `heartbeat{roomId, revision, serverTime}`. ' +
       '이벤트에는 내용(금액·사유·닉네임)을 싣지 않는다. 재전송은 없다: 끊기면 새로 연결해 전체를 재조회한다. ' +
       '한도: 참여자당 5개, 방당 50개(인스턴스 전체 합산). 초과하면 새 연결만 429.',
   })
