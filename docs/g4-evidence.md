@@ -156,20 +156,23 @@ Codex PASS는 정적 검수다. Codex 샌드박스에서는 DB 시험을 실행�
 
 **점검 시간**
 
-3. **v1 서버를 멈춘다**: Render 서비스를 일시 중지(suspend)해 인스턴스를 내린다. Supabase의 `pg_stat_activity`에서 서버 연결(`application_name`이 `ddallang-bus-…`인 LISTEN 연결 포함)이 없어졌는지 확인한다. 진행 중이던 요청은 이 시점에 끊긴다.
-4. **백업(필수)**: `pg_dump`로 DB 전체(`_prisma_migrations` 포함)를 받아 둔다. 적용 후 실패의 유일한 되돌림 수단이다. 연결 문자열은 터미널 기록·채팅에 남기지 않는다.
-5. **초기화**: `psql "<Session pooler 주소>" -v ON_ERROR_STOP=1 -f prisma/reset-v1-data.sql`.
-6. `main` 병합·push(자동 배포는 꺼져 있다).
-7. **v2 배포**: 서비스를 v2 커밋으로 배포하며 재개한다. 재개가 v1 이미지를 먼저 띄우는 방식이라면 그 사이에 v1이 방을 만들 수 있다. 그 경우 8의 가드 실패로 끝나고 데이터는 바뀌지 않는다.
-8. 시작 로그에서 `20261116000000_v2_participant_identity` 적용을 확인한다.
-9. **점검**: `GET /health`, 방 생성 → 입장 → 이어받기 요청·승인 → 거래 → SSE(`ready`·`claim.resolved`·`access.revoked`) → 종료·정산. 점검 방은 사용자에게 알리고 남기거나 다시 초기화한다.
-10. 프론트엔드 2.0.0을 배포하고 그 주소를 `CORS_ORIGINS`에 넣어 재배포한다. 여기까지가 점검 시간이며, 끝나면 자동 배포를 다시 켠다.
+v1이 DB에 다시 쓰지 못하게 하는 장치는 Render의 재개 방식에 기대지 않는다. (1) **DB 자격 증명을 바꿔** Render에 저장된 v1 설정으로는 접속하지 못하게 하고, (2) **서버를 띄우기 전에 v2 마이그레이션을 직접 적용**한다. v2 스키마에는 `RoomMember`가 없어 v1 코드의 모든 변경 경로(방 생성, 입장, 인증 가드)가 실패하므로, 이후 어떤 경로로 v1 빌드가 떠도 데이터를 쓸 수 없다.
+
+3. **v1 서버를 멈춘다**: Render 서비스를 일시 중지(suspend)해 인스턴스를 내리고, Supabase의 `pg_stat_activity`에서 서버 연결(`application_name`이 `ddallang-bus-…`인 LISTEN 연결 포함)이 없어졌는지 확인한다. 진행 중이던 요청은 이 시점에 끊긴다.
+4. **DB 비밀번호를 바꾼다**(Supabase 설정). 남은 연결이 있으면 `pg_terminate_backend`로 끊고 다시 확인한다.
+5. **백업(필수)**: 새 자격 증명으로 `pg_dump`를 실행해 DB 전체(`_prisma_migrations` 포함)를 받아 둔다. 적용 후 실패의 유일한 되돌림 수단이다. 연결 문자열은 터미널 기록·채팅에 남기지 않는다.
+6. **초기화**: `psql "<새 Session pooler 주소>" -v ON_ERROR_STOP=1 -f prisma/reset-v1-data.sql`.
+7. **v2 마이그레이션 직접 적용**: v2 브랜치 체크아웃에서 `DATABASE_URL="<새 주소>" pnpm exec prisma migrate deploy`. `prisma migrate status`로 7건 적용(`20261116000000_v2_participant_identity` 포함)을 확인한다. 4~7 사이에는 접속할 수 있는 서버가 없으므로 가드가 실패하지 않는다.
+8. `main` 병합·push(자동 배포는 꺼져 있다).
+9. **v2 배포**: Render의 `DATABASE_URL`을 새 비밀번호로 바꾸고 최신 커밋(v2)을 배포하며 서비스를 재개한다. 컨테이너의 `prisma migrate deploy`는 이미 적용된 것을 확인하고 넘어간다. 재개가 이전 v1 빌드를 띄우더라도 v2 스키마에서는 쓰기가 실패하므로 데이터가 생기지 않는다. 그 경우 다시 일시 중지하고 최신 커밋을 배포한다.
+10. **점검**: 시작 로그의 v2 기동, `GET /health`, 방 생성 → 입장 → 이어받기 요청·승인 → 거래 → SSE(`ready`·`claim.resolved`·`access.revoked`) → 종료·정산. 점검 방은 사용자에게 알리고 남기거나 다시 초기화한다.
+11. 프론트엔드 2.0.0을 배포하고 그 주소를 `CORS_ORIGINS`에 넣어 재배포한다. 여기까지가 점검 시간이며, 끝나면 자동 배포를 다시 켠다.
 
 **실패했을 때**
 
-- **적용 전 실패(가드에 걸림, 8에서 확인)**: Postgres는 마이그레이션 전체를 롤백하므로 스키마·데이터는 그대로지만 `_prisma_migrations`에 실패 기록이 남아 다음 배포가 막힌다. 서비스를 다시 멈추고(3) `prisma migrate resolve --rolled-back 20261116000000_v2_participant_identity`로 기록을 정리한 뒤 5부터 다시 한다.
-- **적용 후 실패(마이그레이션은 성공, v2 서버 기동이나 9의 점검이 실패)**: **v1 이미지로 되돌리지 않는다**(스키마가 맞지 않고, `migrate resolve --rolled-back`은 스키마를 되돌리지 않는다). 서비스를 멈춘 채로 둘 중 하나를 고른다. (a) v2를 고쳐 다시 배포한다(앞으로 고치기, 데이터는 이미 비어 있다). (b) 4의 백업으로 DB 전체(`_prisma_migrations` 포함)를 복원하고 v1 커밋(`main` 병합 이전)을 배포한다. (b)는 `main`에서 v2 병합을 되돌리는 결정이므로 사용자 승인을 받는다.
-- 프론트엔드 2.0.0은 9의 점검이 끝나기 전에 공개하지 않는다.
+- **7에서 가드에 걸림**(4 이후 남은 연결이 쓴 경우 등): Postgres가 마이그레이션 전체를 롤백하므로 스키마·데이터는 그대로지만 `_prisma_migrations`에 실패 기록이 남는다. 연결을 다시 확인하고(4), `prisma migrate resolve --rolled-back 20261116000000_v2_participant_identity`로 기록을 정리한 뒤 6부터 다시 한다.
+- **적용 후 실패(7은 성공, 9의 기동이나 10의 점검이 실패)**: **v1 이미지로 되돌리지 않는다**(스키마가 맞지 않고, `migrate resolve --rolled-back`은 스키마를 되돌리지 않는다). 서비스를 멈춘 채로 둘 중 하나를 고른다. (a) v2를 고쳐 다시 배포한다(앞으로 고치기, 데이터는 이미 비어 있다). (b) 5의 백업으로 DB 전체(`_prisma_migrations` 포함)를 복원하고, Render `DATABASE_URL`을 맞춘 뒤 v1 커밋(`main` 병합 이전)을 배포한다. (b)는 `main`에서 v2 병합을 되돌리는 결정이므로 사용자 승인을 받는다.
+- 프론트엔드 2.0.0은 10의 점검이 끝나기 전에 공개하지 않는다.
 
 ### 7.7 Spec이 정하지 않아 구현이 고른 것 (문서 PR 후보, 계약 변경 아님)
 
