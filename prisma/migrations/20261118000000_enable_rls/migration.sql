@@ -11,7 +11,8 @@ ALTER TABLE "IdempotencyRecord" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "StreamLease" ENABLE ROW LEVEL SECURITY;
 
 -- `_prisma_migrations`는 `prisma migrate deploy`가 만드는 이력 표라 시험의 격리 스키마에는 없을 수 있다.
--- Supabase 전용 역할은 다른 Postgres(로컬·시험)에는 없으므로 있을 때만 권한을 회수한다.
+-- Supabase 전용 역할은 다른 Postgres(로컬·시험)에는 없으므로 있을 때만 권한을 회수한다. 지금 있는 표의 권한과 함께,
+-- 이 연결 역할이 앞으로 이 스키마에 만드는 표에 자동으로 주는 기본 권한도 회수한다.
 DO $$
 BEGIN
   IF to_regclass('"_prisma_migrations"') IS NOT NULL THEN
@@ -19,8 +20,10 @@ BEGIN
   END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
     EXECUTE format('REVOKE ALL ON ALL TABLES IN SCHEMA %I FROM anon', current_schema());
+    EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA %I REVOKE ALL ON TABLES FROM anon', current_schema());
   END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
     EXECUTE format('REVOKE ALL ON ALL TABLES IN SCHEMA %I FROM authenticated', current_schema());
+    EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA %I REVOKE ALL ON TABLES FROM authenticated', current_schema());
   END IF;
 END $$;
