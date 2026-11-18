@@ -67,7 +67,8 @@ describe('v2 마이그레이션 적용 조건 (BE-M1, PD-22)', () => {
     db = await createIsolatedDb();
     const applied = await applyMigrations(db);
     expect(applied).toEqual(all);
-    expect(applied.at(-1)).toBe(V2);
+    // v2 뒤에도 마이그레이션이 붙을 수 있다(예: 20261118000000_enable_rls). v2가 적용 목록에 있는지만 본다.
+    expect(applied).toContain(V2);
     expect(await tables(db)).not.toContain('RoomMember');
     expect(await tables(db)).toEqual(
       expect.arrayContaining(['ClaimRequest', 'RevokedIdentity', 'Participant']),
